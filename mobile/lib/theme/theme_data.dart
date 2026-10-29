@@ -1,7 +1,9 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
 import 'package:immich_mobile/constants/locales.dart';
 import 'package:immich_mobile/extensions/theme_extensions.dart';
+import 'package:immich_mobile/widgets/common/predictive_back.dart';
 
 class ImmichTheme {
   final ColorScheme light;
@@ -23,6 +25,12 @@ ThemeData getThemeData({required ColorScheme colorScheme, required Locale locale
     scaffoldBackgroundColor: colorScheme.surface,
     splashColor: colorScheme.primary.withValues(alpha: 0.1),
     highlightColor: colorScheme.primary.withValues(alpha: 0.1),
+    pageTransitionsTheme: const PageTransitionsTheme(
+      builders: {
+        TargetPlatform.android: BackGestureFadeForwardsPageTransitionsBuilder(),
+        TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+      },
+    ),
     bottomSheetTheme: BottomSheetThemeData(backgroundColor: colorScheme.surfaceContainer),
     fontFamily: _getFontFamilyFromLocale(locale),
     snackBarTheme: SnackBarThemeData(

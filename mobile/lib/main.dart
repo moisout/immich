@@ -44,6 +44,7 @@ import 'package:immich_mobile/utils/fallback_localizations.dart';
 import 'package:immich_mobile/utils/licenses.dart';
 import 'package:immich_mobile/utils/migration.dart';
 import 'package:immich_mobile/widgets/common/overscroll_scroll_behavior.dart';
+import 'package:immich_mobile/widgets/common/predictive_back.dart';
 import 'package:immich_mobile/wm_executor.dart';
 import 'package:immich_ui/immich_ui.dart';
 import 'package:intl/date_symbol_data_local.dart';
@@ -303,7 +304,11 @@ class ImmichAppState extends ConsumerState<ImmichApp> with WidgetsBindingObserve
         ),
         routerConfig: router.config(
           deepLinkBuilder: _deepLinkBuilder,
-          navigatorObservers: () => [AppNavigationObserver(ref: ref), TransitioningRouteObserver()],
+          navigatorObservers: () => [
+            AppNavigationObserver(ref: ref),
+            TransitioningRouteObserver(),
+            PredictiveBackRouteObserver(),
+          ],
         ),
       ),
     );
