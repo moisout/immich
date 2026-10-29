@@ -18,6 +18,7 @@ import 'package:immich_mobile/providers/infrastructure/readonly_mode.provider.da
 import 'package:immich_mobile/providers/search/search_input_focus.provider.dart';
 import 'package:immich_mobile/providers/tab.provider.dart';
 import 'package:immich_mobile/routing/router.dart';
+import 'package:immich_mobile/widgets/common/predictive_back.dart';
 import 'package:immich_mobile/widgets/common/tab_top_bar.dart';
 
 @RoutePage()
@@ -33,6 +34,7 @@ class _TabShellPageState extends ConsumerState<TabShellPage> {
   bool _isMultiSelectEnabled = false;
   int _pointerCount = 0;
   int? _swipeStartIndex;
+  double? _backStartPixels;
 
   @override
   void initState() {
@@ -55,6 +57,37 @@ class _TabShellPageState extends ConsumerState<TabShellPage> {
     if (wasMultiTouch != _pointerCount > 1) {
       setState(() {});
     }
+  }
+
+  // Back on another tab slides the pages back to Photos along with the gesture
+  void _onBackStart(PageController pageController) {
+    if (pageController.hasClients) {
+      _backStartPixels = pageController.position.pixels;
+    }
+  }
+
+  void _onBackProgress(PageController pageController, double progress) {
+    final start = _backStartPixels;
+    if (start != null && pageController.hasClients) {
+      pageController.jumpTo(start * (1 - progress));
+    }
+  }
+
+  void _onBackCancel(PageController pageController) {
+    final start = _backStartPixels;
+    _backStartPixels = null;
+    if (start != null && pageController.hasClients) {
+      unawaited(pageController.animateTo(start, duration: Durations.short4, curve: Curves.easeOutCubic));
+    }
+  }
+
+  void _onBack(PageController pageController, TabsRouter tabsRouter) {
+    if (_backStartPixels == null || !pageController.hasClients) {
+      tabsRouter.setActiveIndex(kPhotoTabIndex);
+      return;
+    }
+    _backStartPixels = null;
+    unawaited(pageController.animateToPage(kPhotoTabIndex, duration: Durations.medium2, curve: Curves.easeOutCubic));
   }
 
   bool _onPageScrollNotification(ScrollNotification notification, TabsRouter tabsRouter) {
@@ -149,9 +182,13 @@ class _TabShellPageState extends ConsumerState<TabShellPage> {
             ),
           ),
         );
-        return PopScope(
-          canPop: tabsRouter.activeIndex == 0,
-          onPopInvokedWithResult: (didPop, _) => !didPop ? tabsRouter.setActiveIndex(0) : null,
+        return PredictiveBackScope(
+          // Multi-select handles back itself
+          enabled: tabsRouter.activeIndex != kPhotoTabIndex && !_isMultiSelectEnabled,
+          onStart: (_) => _onBackStart(pageController),
+          onProgress: (event) => _onBackProgress(pageController, event.progress),
+          onCancel: () => _onBackCancel(pageController),
+          onBack: () => _onBack(pageController, tabsRouter),
           child: Scaffold(
             resizeToAvoidBottomInset: false,
             // The navigation bar floats over the pages
