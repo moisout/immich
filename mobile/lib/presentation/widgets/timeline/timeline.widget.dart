@@ -149,6 +149,7 @@ class _SliverTimelineState extends ConsumerState<_SliverTimeline> with WidgetsBi
   double _restoreScrollAdjustment = 0;
   Completer<void>? _restoreCompleter;
   bool _isZooming = false;
+  final _zoomTransform = ValueNotifier(Matrix4.identity());
 
   final Debouncer _fastScrollDebouncer = Debouncer(interval: const Duration(milliseconds: 100));
 
@@ -289,6 +290,7 @@ class _SliverTimelineState extends ConsumerState<_SliverTimeline> with WidgetsBi
     WidgetsBinding.instance.removeObserver(this);
     _fastScrollDebouncer.dispose();
     _scrollController.dispose();
+    _zoomTransform.dispose();
     unawaited(_eventSubscription?.cancel());
     super.dispose();
   }
@@ -391,6 +393,7 @@ class _SliverTimelineState extends ConsumerState<_SliverTimeline> with WidgetsBi
             resizeToAvoidBottomInset: false,
             floatingActionButton: const DownloadStatusFloatingButton(),
             body: TimelinePinchZoom(
+              transform: _zoomTransform,
               onColumnCountWillChange: _onColumnCountWillChange,
               onZoomingChanged: (isZooming) => setState(() => _isZooming = isZooming),
               child: asyncSegments.widgetWhen(
@@ -422,6 +425,7 @@ class _SliverTimelineState extends ConsumerState<_SliverTimeline> with WidgetsBi
                           if (widget.topSliverWidget != null) widget.topSliverWidget!,
                           SliverSegmentedList(
                             segments: segments,
+                            zoomTransform: _zoomTransform,
                             delegate: SliverChildBuilderDelegate(
                               (ctx, index) {
                                 if (index >= childCount) {

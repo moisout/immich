@@ -8,6 +8,7 @@ import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
 import 'package:immich_mobile/presentation/widgets/timeline/timeline.state.dart';
 import 'package:immich_mobile/presentation/widgets/timeline/timeline_drag_region.dart';
+import 'package:immich_mobile/presentation/widgets/timeline/timeline_pinch_zoom.dart';
 import 'package:immich_mobile/providers/infrastructure/readonly_mode.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/timeline.provider.dart';
 import 'package:immich_mobile/providers/timeline/multiselect.provider.dart';
@@ -29,6 +30,11 @@ class _TimelineDragSelectionState extends ConsumerState<TimelineDragSelection> {
   ScrollPhysics? _scrollPhysics;
 
   void _setDragStartIndex(TimelineAssetIndex index) {
+    // A long press while pinching is part of the zoom gesture
+    if (TimelinePinchZoom.isMultiTouch(context)) {
+      return;
+    }
+
     setState(() {
       _scrollPhysics = const ClampingScrollPhysics();
       _dragAnchorIndex = index;
@@ -103,7 +109,7 @@ class _TimelineDragSelectionState extends ConsumerState<TimelineDragSelection> {
       onStart: !isReadonlyModeEnabled ? _setDragStartIndex : null,
       onAssetEnter: _handleDragAssetEnter,
       onEnd: !isReadonlyModeEnabled ? _stopDrag : null,
-      onScroll: (direction) => unawaited(_dragScroll(direction)),
+      onScroll: (direction) => TimelinePinchZoom.isMultiTouch(context) ? null : unawaited(_dragScroll(direction)),
       onScrollStart: () {
         // Minimize the bottom sheet when drag selection starts
         // TODO(agg23): When isReadonlyModeEnabled, onEnd has not been set, so there is never a trailing setScrolling(false), sticking to isInteracting until the next interaction

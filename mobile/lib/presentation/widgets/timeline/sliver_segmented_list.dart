@@ -9,15 +9,22 @@ import 'package:immich_mobile/presentation/widgets/timeline/segment.model.dart';
 class SliverSegmentedList extends SliverMultiBoxAdaptorWidget {
   final List<Segment> _segments;
 
-  const SliverSegmentedList({super.key, required this._segments, required super.delegate});
+  /// Transform applied when painting the assets, in viewport coordinates. Used by pinch to zoom
+  final ValueListenable<Matrix4>? zoomTransform;
+
+  const SliverSegmentedList({super.key, required this._segments, required super.delegate, this.zoomTransform});
 
   @override
-  RenderSliverTimelineBoxAdaptor createRenderObject(BuildContext context) =>
-      RenderSliverTimelineBoxAdaptor(childManager: context as SliverMultiBoxAdaptorElement, segments: _segments);
+  RenderSliverTimelineBoxAdaptor createRenderObject(BuildContext context) => RenderSliverTimelineBoxAdaptor(
+    childManager: context as SliverMultiBoxAdaptorElement,
+    segments: _segments,
+    zoomTransform: zoomTransform,
+  );
 
   @override
   void updateRenderObject(BuildContext context, RenderSliverTimelineBoxAdaptor renderObject) {
     renderObject.segments = _segments;
+    renderObject.zoomTransform = zoomTransform;
   }
 }
 
@@ -33,7 +40,67 @@ class RenderSliverTimelineBoxAdaptor extends RenderSliverMultiBoxAdaptor {
     markNeedsLayout();
   }
 
-  RenderSliverTimelineBoxAdaptor({required super.childManager, required this._segments});
+  ValueListenable<Matrix4>? _zoomTransform;
+
+  set zoomTransform(ValueListenable<Matrix4>? value) {
+    if (_zoomTransform == value) {
+      return;
+    }
+    if (attached) {
+      _zoomTransform?.removeListener(markNeedsPaint);
+      value?.addListener(markNeedsPaint);
+    }
+    _zoomTransform = value;
+    markNeedsPaint();
+  }
+
+  final _zoomLayer = LayerHandle<TransformLayer>();
+
+  RenderSliverTimelineBoxAdaptor({required super.childManager, required this._segments, this._zoomTransform});
+
+  @override
+  void attach(PipelineOwner owner) {
+    super.attach(owner);
+    _zoomTransform?.addListener(markNeedsPaint);
+  }
+
+  @override
+  void detach() {
+    _zoomTransform?.removeListener(markNeedsPaint);
+    super.detach();
+  }
+
+  @override
+  void dispose() {
+    _zoomLayer.layer = null;
+    super.dispose();
+  }
+
+  @override
+  void paint(PaintingContext context, Offset offset) {
+    final transform = _zoomTransform?.value;
+    final isVerticalForward =
+        applyGrowthDirectionToAxisDirection(constraints.axisDirection, constraints.growthDirection) ==
+        AxisDirection.down;
+    if (transform == null || transform.isIdentity() || !isVerticalForward || firstChild == null) {
+      _zoomLayer.layer = null;
+      super.paint(context, offset);
+      return;
+    }
+
+    // The transform is relative to the viewport, not to this sliver
+    final paintOffset = (parentData is SliverPhysicalParentData)
+        ? (parentData! as SliverPhysicalParentData).paintOffset
+        : Offset.zero;
+    _zoomLayer.layer = context.pushTransform(needsCompositing, offset - paintOffset, transform, (context, _) {
+      // Paint the cache extent too, zooming out brings rows from outside the viewport into view
+      RenderBox? child = firstChild;
+      while (child != null) {
+        context.paintChild(child, offset + Offset(childCrossAxisPosition(child), childMainAxisPosition(child)));
+        child = childAfter(child);
+      }
+    }, oldLayer: _zoomLayer.layer);
+  }
 
   int getMinChildIndexForScrollOffset(double offset) =>
       _segments.findByOffset(offset)?.getMinChildIndexForScrollOffset(offset) ?? 0;

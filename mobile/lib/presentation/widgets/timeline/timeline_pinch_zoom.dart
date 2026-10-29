@@ -28,14 +28,18 @@ const Duration _kRelayoutTimeout = Duration(milliseconds: 800);
 
 /// Pinch to zoom on the timeline grid. The grid follows the fingers continuously and switches the number of columns
 /// (the `timelineTilesPerRow` setting) mid-gesture, cross-fading from a snapshot while the asset under the fingers
-/// stays in place. On release the grid settles into the new layout.
+/// stays at the same height. On release the grid settles into the new layout. The left edge stays aligned throughout.
 class TimelinePinchZoom extends ConsumerStatefulWidget {
   const TimelinePinchZoom({
     super.key,
+    required this.transform,
     required this.onColumnCountWillChange,
     required this.onZoomingChanged,
     required this.child,
   });
+
+  /// Receives the zoom transform of the asset grid, in the coordinates of [child]
+  final ValueNotifier<Matrix4> transform;
 
   /// Called immediately before the new column count is written to the setting. The returned future completes once
   /// the timeline has been laid out with the new column count and scrolled to the anchor
@@ -45,6 +49,11 @@ class TimelinePinchZoom extends ConsumerStatefulWidget {
   final ValueChanged<bool> onZoomingChanged;
 
   final Widget child;
+
+  /// Whether more than one pointer went down since all pointers were last lifted, gestures such as long press
+  /// selection should be ignored then as they are part of a pinch
+  static bool isMultiTouch(BuildContext context) =>
+      context.findAncestorStateOfType<_TimelinePinchZoomState>()?._isMultiTouch ?? false;
 
   @override
   ConsumerState createState() => _TimelinePinchZoomState();
@@ -60,15 +69,18 @@ class _TimelinePinchZoomState extends ConsumerState<TimelinePinchZoom> with Tick
     ..addListener(() => setState(() {}))
     ..addStatusListener(_onFadeStatus);
 
-  // The grid is drawn at `_translation + _scale * position`
-  Offset _translation = Offset.zero;
+  int _pointerCount = 0;
+  bool _isMultiTouch = false;
+
+  // The grid is drawn at `(_scale * x, _translation + _scale * y)`, keeping the left edge in place
+  double _translation = 0;
   double _scale = 1.0;
 
   // Gesture state
   bool _isZooming = false;
   int _columnCount = 4;
-  Offset _focalPoint = Offset.zero;
-  Offset _anchorPoint = Offset.zero;
+  double _focalY = 0;
+  double _anchorY = 0;
   double _baseScale = 1.0;
   double _gestureScaleOrigin = 1.0;
 
@@ -76,10 +88,9 @@ class _TimelinePinchZoomState extends ConsumerState<TimelinePinchZoom> with Tick
   bool _isSwitching = false;
   bool _settleAfterSwitch = false;
   ui.Image? _snapshot;
-  double _snapshotScale = 1.0;
 
   // Settle animation state
-  Offset _settleFromTranslation = Offset.zero;
+  double _settleFromTranslation = 0;
   double _settleFromScale = 1.0;
 
   @override
@@ -90,11 +101,27 @@ class _TimelinePinchZoomState extends ConsumerState<TimelinePinchZoom> with Tick
     super.dispose();
   }
 
-  Size? get _size => (_contentKey.currentContext?.findRenderObject() as RenderBox?)?.size;
+  void _onPointerDown(PointerDownEvent _) {
+    _pointerCount++;
+    if (_pointerCount > 1) {
+      _isMultiTouch = true;
+    }
+  }
+
+  void _onPointerUp(PointerEvent _) {
+    _pointerCount = math.max(0, _pointerCount - 1);
+    if (_pointerCount == 0) {
+      _isMultiTouch = false;
+    }
+  }
 
   double _tileExtent(int columnCount) {
-    final width = _size?.width ?? 0;
+    final width = (_contentKey.currentContext?.findRenderObject() as RenderBox?)?.size.width ?? 0;
     return math.max(1.0, width - kTimelineSpacing * (columnCount - 1)) / columnCount;
+  }
+
+  void _applyTransform() {
+    widget.transform.value = Matrix4.diagonal3Values(_scale, _scale, 1)..setTranslationRaw(0, _translation, 0);
   }
 
   void _onScaleUpdate(ScaleUpdateDetails details) {
@@ -119,17 +146,16 @@ class _TimelinePinchZoomState extends ConsumerState<TimelinePinchZoom> with Tick
       }
     }
 
-    setState(() {
-      _translation = _focalPoint - _anchorPoint * _scale;
-    });
+    _translation = _focalY - _anchorY * _scale;
+    _applyTransform();
   }
 
   void _startZoom(ScaleUpdateDetails details) {
     _settleController.stop();
     _isZooming = true;
     _columnCount = ref.read(appConfigProvider.select((config) => config.timeline.tilesPerRow));
-    _focalPoint = details.localFocalPoint;
-    _anchorPoint = (_focalPoint - _translation) / _scale;
+    _focalY = details.localFocalPoint.dy;
+    _anchorY = (_focalY - _translation) / _scale;
     _baseScale = _scale;
     _gestureScaleOrigin = details.scale;
     widget.onZoomingChanged(true);
@@ -174,34 +200,26 @@ class _TimelinePinchZoomState extends ConsumerState<TimelinePinchZoom> with Tick
       _snapshot = null;
     }
 
-    final tile = _findTileNearest(_anchorPoint);
-    final anchorFraction = tile == null
-        ? null
-        : Offset(
-            (_anchorPoint.dx - tile.rect.left) / tile.rect.width,
-            (_anchorPoint.dy - tile.rect.top) / tile.rect.height,
-          );
+    // The grid is only scaled horizontally, so any tile in the row under the fingers works as the anchor
+    final width = (_contentKey.currentContext?.findRenderObject() as RenderBox?)?.size.width ?? 0;
+    final tile = _findTileNearest(Offset(width / 2, _anchorY));
+    final anchorFraction = tile == null ? null : (_anchorY - tile.rect.top) / tile.rect.height;
 
     // Rebase the scale so the tiles keep their on-screen size in the new layout
     _baseScale *= previousExtent / nextExtent;
     _scale *= previousExtent / nextExtent;
-    _snapshotScale = _scale;
     _columnCount = columnCount;
-    _isSwitching = true;
+    setState(() => _isSwitching = true);
 
     final anchor = tile == null
         ? null
-        : (
-            assetIndex: tile.assetIndex,
-            currentTop: tile.rect.top,
-            targetTop: _anchorPoint.dy - anchorFraction!.dy * nextExtent,
-          );
+        : (assetIndex: tile.assetIndex, currentTop: tile.rect.top, targetTop: _anchorY - anchorFraction! * nextExtent);
     final relayout = widget.onColumnCountWillChange(anchor);
     unawaited(ref.read(settingsProvider).write(.timelineTilesPerRow, columnCount));
     unawaited(_completeSwitch(relayout, tile?.assetIndex, anchorFraction));
   }
 
-  Future<void> _completeSwitch(Future<void> relayout, int? assetIndex, Offset? anchorFraction) async {
+  Future<void> _completeSwitch(Future<void> relayout, int? assetIndex, double? anchorFraction) async {
     await relayout.timeout(_kRelayoutTimeout, onTimeout: () {});
     // Wait for the frame that lays out the restored scroll position
     await WidgetsBinding.instance.endOfFrame;
@@ -211,13 +229,12 @@ class _TimelinePinchZoomState extends ConsumerState<TimelinePinchZoom> with Tick
 
     final tile = assetIndex == null ? null : _findTile(assetIndex);
     if (tile != null && anchorFraction != null) {
-      _anchorPoint = Offset(tile.left + anchorFraction.dx * tile.width, tile.top + anchorFraction.dy * tile.height);
+      _anchorY = tile.top + anchorFraction * tile.height;
     }
 
-    setState(() {
-      _isSwitching = false;
-      _translation = _focalPoint - _anchorPoint * _scale;
-    });
+    _translation = _focalY - _anchorY * _scale;
+    _applyTransform();
+    setState(() => _isSwitching = false);
     unawaited(_fadeController.forward(from: 0));
 
     if (_settleAfterSwitch) {
@@ -243,13 +260,12 @@ class _TimelinePinchZoomState extends ConsumerState<TimelinePinchZoom> with Tick
 
   void _onSettleTick() {
     final t = Curves.easeOutCubic.transform(_settleController.value);
-    setState(() {
-      _translation = Offset.lerp(_settleFromTranslation, Offset.zero, t)!;
-      _scale = ui.lerpDouble(_settleFromScale, 1.0, t)!;
-    });
+    _translation = ui.lerpDouble(_settleFromTranslation, 0, t)!;
+    _scale = ui.lerpDouble(_settleFromScale, 1.0, t)!;
+    _applyTransform();
   }
 
-  /// Visits the laid out timeline tiles, with their rects in the untransformed grid coordinates
+  /// Visits the laid out timeline tiles, with their rects in the unzoomed coordinates of the child
   void _visitTiles(bool Function(int assetIndex, Rect rect) visitor) {
     final contentContext = _contentKey.currentContext;
     final content = contentContext?.findRenderObject();
@@ -305,47 +321,39 @@ class _TimelinePinchZoomState extends ConsumerState<TimelinePinchZoom> with Tick
     return result;
   }
 
-  Matrix4 _scaleAbout(Offset origin, double scale) {
-    return Matrix4.diagonal3Values(scale, scale, 1)
-      ..setTranslationRaw(origin.dx * (1 - scale), origin.dy * (1 - scale), 0);
-  }
-
   @override
   Widget build(BuildContext context) {
     final snapshot = _snapshot;
-    final double contentOpacity = _isSwitching ? 0 : (snapshot == null ? 1 : _fadeController.value);
 
-    return RawGestureDetector(
-      gestures: {
-        _CustomScaleGestureRecognizer: GestureRecognizerFactoryWithHandlers<_CustomScaleGestureRecognizer>(
-          () => _CustomScaleGestureRecognizer(),
-          (_CustomScaleGestureRecognizer scale) {
-            scale.onUpdate = _onScaleUpdate;
-            scale.onEnd = (_) => _endZoom();
-          },
-        ),
-      },
-      child: ClipRect(
+    return Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: _onPointerDown,
+      onPointerUp: _onPointerUp,
+      onPointerCancel: _onPointerUp,
+      child: RawGestureDetector(
+        gestures: {
+          _CustomScaleGestureRecognizer: GestureRecognizerFactoryWithHandlers<_CustomScaleGestureRecognizer>(
+            () => _CustomScaleGestureRecognizer(),
+            (_CustomScaleGestureRecognizer scale) {
+              scale.onUpdate = _onScaleUpdate;
+              scale.onEnd = (_) => _endZoom();
+            },
+          ),
+        },
         child: Stack(
           fit: StackFit.expand,
           children: [
             RepaintBoundary(
               key: _boundaryKey,
-              child: Opacity(
-                opacity: contentOpacity,
-                child: Transform(
-                  transform: Matrix4.diagonal3Values(_scale, _scale, 1)
-                    ..setTranslationRaw(_translation.dx, _translation.dy, 0),
-                  child: KeyedSubtree(key: _contentKey, child: widget.child),
-                ),
-              ),
+              child: KeyedSubtree(key: _contentKey, child: widget.child),
             ),
             if (snapshot != null)
               IgnorePointer(
                 child: Opacity(
-                  opacity: 1 - contentOpacity,
-                  child: Transform(
-                    transform: _scaleAbout(_focalPoint, _scale / _snapshotScale),
+                  opacity: _isSwitching ? 1 : 1 - _fadeController.value,
+                  // Opaque, so the timeline being laid out again doesn't shine through the gaps
+                  child: ColoredBox(
+                    color: Theme.of(context).scaffoldBackgroundColor,
                     child: RawImage(image: snapshot, fit: BoxFit.fill),
                   ),
                 ),
