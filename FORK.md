@@ -45,12 +45,18 @@ Then go through the [test checklist](#test-checklist).
 Toolchain comes from `mise` (`mobile/mise.toml`): Flutter, Java 21. Gotchas:
 
 - `mise install` / `mise run` rewrite `mise.lock` and `mobile/mise.lock`. Revert them, they are not fork changes.
+- An upstream change to the root `mise.toml` makes mise refuse it until `mise trust` is run again.
+- A full `mise install` fails resolving lock entries for other platforms. Install only what the build needs:
+  `mise install` in `mobile`, plus `mise install node npm:@openapitools/openapi-generator-cli` for the API client.
 - Flutter must use Java 21 (`flutter config --jdk-dir "$(mise where java)"`), Gradle 8.14 fails on Java 25.
-- `codegen:native` (ffigen) can't find clang's headers. Run it manually:
-  `cd native/native_core && dart run ffigen --config ffigen.yaml --compiler-opts "-I/usr/lib/clang/<version>/include"`,
-  then rerun `mise run codegen:dart codegen:drift:migration` which were skipped.
+- `codegen:native` (ffigen) can't find clang's headers, and its failure skips the other codegen tasks. Run it
+  manually from `mobile` (so mise provides `dart`):
+  `mise exec -- sh -c 'cd ../native/native_core && dart run ffigen --config ffigen.yaml --compiler-opts "-I/usr/lib/clang/<version>/include"'`,
+  then the remaining tasks one by one: `//:open-api-dart`, `codegen:pigeon`, `codegen:translation`, `codegen:dart`,
+  `codegen:drift:migration`, `codegen:drift:schema` (`mise run <task>` each).
 - Release builds are signed with the local debug key (no `key.jks`). Keep `~/.android/debug.keystore`, Android only
-  accepts updates signed with the same key.
+  accepts updates signed with the same key. The installed app's key has the SHA-256 fingerprint ending in `98:1D:77`
+  (`keytool -list -keystore ~/.android/debug.keystore -storepass android`).
 
 ## Changes
 
