@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:auto_route/auto_route.dart';
 import 'package:flutter/gestures.dart' show Drag, kTouchSlop;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show PredictiveBackEvent, SwipeEdge;
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
 import 'package:immich_mobile/domain/models/events.model.dart';
@@ -25,6 +26,7 @@ import 'package:immich_mobile/providers/infrastructure/settings.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/timeline.provider.dart';
 import 'package:immich_mobile/providers/view_intent/view_intent_file_path.provider.dart';
 import 'package:immich_mobile/widgets/common/immich_loading_indicator.dart';
+import 'package:immich_mobile/widgets/common/predictive_back.dart';
 import 'package:immich_mobile/widgets/photo_view/photo_view.dart';
 
 enum _DragIntent { none, scroll, dismiss }
@@ -50,6 +52,12 @@ class _AssetPageState extends ConsumerState<AssetPage> {
   late PhotoViewControllerValue _initialPhotoViewState;
 
   bool _showingDetails = false;
+  // Keeps the details rendered while they scroll out after being closed
+  bool _keepDetails = false;
+  double _backStartScrollOffset = 0.0;
+  Offset? _backStartTouch;
+  Offset? _backLastTouch;
+  double _backLastTouchProgress = 0.0;
   bool _isZoomed = false;
   bool _restoreControlsAfterZoom = false;
   // Frozen during dismiss drag + settle to prevent widget tree swap mid-animation.
@@ -71,6 +79,7 @@ class _AssetPageState extends ConsumerState<AssetPage> {
     super.initState();
     _eventSubscription = EventStream.shared.listen(_onEvent);
     _asset = ref.read(timelineServiceProvider).getAssetSafe(widget.index);
+    _scrollController.addListener(_onScroll);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_scrollController.hasClients) {
         return;
@@ -119,6 +128,90 @@ class _AssetPageState extends ConsumerState<AssetPage> {
     }
     _viewer.setShowingDetails(true);
     unawaited(_scrollController.animateTo(_snapOffset, duration: Durations.medium2, curve: Curves.easeOutCubic));
+  }
+
+  void _hideDetails() {
+    if (!_scrollController.hasClients) {
+      return;
+    }
+    _viewer.setShowingDetails(false);
+    unawaited(_scrollController.animateTo(0, duration: Durations.medium2, curve: Curves.easeOutCubic));
+  }
+
+  // The details slide in from the bottom of the screen while the asset scrolls up, and reach their place below it
+  // at the snap offset
+  double _detailsShift(double viewportHeight, double detailsOffset) {
+    if (!_scrollController.hasClients || _snapOffset <= 0) {
+      return 0;
+    }
+    final progress = (_scrollController.offset / _snapOffset).clamp(0.0, 1.0);
+    return (viewportHeight - detailsOffset) * (1 - progress);
+  }
+
+  void _onScroll() {
+    if (_keepDetails && !_showingDetails && _scrollController.offset <= 0) {
+      setState(() => _keepDetails = false);
+    }
+  }
+
+  // A back gesture closes the details, or else dismisses the asset like dragging it down
+  void _onBackStart(PredictiveBackEvent event) {
+    if (_showingDetails) {
+      _backStartScrollOffset = _scrollController.offset;
+    } else {
+      _initialPhotoViewState = _viewController!.value;
+      _backStartTouch = event.touchOffset;
+      _backLastTouch = null;
+      _wasMotionPlayingAtDismiss = ref.read(isPlayingMotionVideoProvider);
+      setState(() => _dragIntent = _DragIntent.dismiss);
+    }
+    _onBackProgress(event);
+  }
+
+  void _onBackProgress(PredictiveBackEvent event) {
+    if (_showingDetails) {
+      final offset = _backStartScrollOffset - event.progress * kPredictiveBackPreviewExtent * _snapOffset;
+      _scrollController.jumpTo(math.max(offset, 0.0));
+      return;
+    }
+
+    final start = _backStartTouch;
+    final touch = event.touchOffset;
+    if (start == null || touch == null) {
+      final delta = Offset(event.progress * context.width * (event.swipeEdge == SwipeEdge.left ? 1 : -1), 0);
+      _updateDismiss(delta, delta.distance, MediaQuery.sizeOf(context).center(Offset.zero));
+      return;
+    }
+    if (touch != _backLastTouch) {
+      _backLastTouch = touch;
+      _backLastTouchProgress = event.progress;
+    }
+    // When the gesture is cancelled, Android animates the progress back to 0 while the touch stays where it was
+    final settle = _backLastTouchProgress > 0 ? (event.progress / _backLastTouchProgress).clamp(0.0, 1.0) : 1.0;
+    // Touch offsets are in physical pixels
+    final pixelRatio = MediaQuery.devicePixelRatioOf(context);
+    final delta = (touch - start) / pixelRatio * settle;
+    _updateDismiss(delta, delta.distance, start / pixelRatio);
+  }
+
+  void _onBackCancel() {
+    if (_showingDetails) {
+      unawaited(
+        _scrollController.animateTo(_backStartScrollOffset, duration: Durations.short4, curve: Curves.easeOutCubic),
+      );
+      return;
+    }
+    _dragIntent = _DragIntent.none;
+    _cancelDismiss();
+  }
+
+  void _onBack() {
+    if (_showingDetails) {
+      _hideDetails();
+      return;
+    }
+    _dragIntent = _DragIntent.none;
+    unawaited(context.maybePop());
   }
 
   bool _willClose(double scrollVelocity) =>
@@ -182,7 +275,8 @@ class _AssetPageState extends ConsumerState<AssetPage> {
 
         _syncShowingDetails();
       case _DragIntent.dismiss:
-        _handleDragDown(context, details.localPosition - _dragStart!.localPosition);
+        final delta = details.localPosition - _dragStart!.localPosition;
+        _updateDismiss(delta, delta.dy.abs(), _dragStart!.localPosition);
     }
   }
 
@@ -211,23 +305,41 @@ class _AssetPageState extends ConsumerState<AssetPage> {
           unawaited(context.maybePop());
           return;
         }
-        _viewer.setOpacity(1.0);
-        _isDismissAnimating = true;
-        unawaited(
-          _viewController
-              ?.animateMultiple(
-                position: _initialPhotoViewState.position,
-                scale: _viewController?.initialScale ?? _initialPhotoViewState.scale,
-                rotation: _initialPhotoViewState.rotation,
-              )
-              .whenComplete(() {
-                if (!mounted) {
-                  return;
-                }
-                setState(() => _isDismissAnimating = false);
-              }),
-        );
+        _cancelDismiss();
     }
+  }
+
+  void _cancelDismiss() {
+    final startOpacity = ref.read(assetViewerProvider).backgroundOpacity;
+    final startScale = _viewController?.scale;
+    final targetScale = _viewController?.initialScale ?? _initialPhotoViewState.scale;
+    // Brings the background back along with the asset scaling back, instead of at once
+    final opacitySubscription = _viewController?.outputStateStream.listen((value) {
+      final scale = value.scale;
+      if (startScale == null || targetScale == null || scale == null || startScale == targetScale) {
+        return;
+      }
+      final progress = ((scale - startScale) / (targetScale - startScale)).clamp(0.0, 1.0);
+      _viewer.setOpacity(startOpacity + (1.0 - startOpacity) * progress);
+    });
+
+    _isDismissAnimating = true;
+    unawaited(
+      _viewController
+          ?.animateMultiple(
+            position: _initialPhotoViewState.position,
+            scale: targetScale,
+            rotation: _initialPhotoViewState.rotation,
+          )
+          .whenComplete(() {
+            unawaited(opacitySubscription?.cancel());
+            if (!mounted) {
+              return;
+            }
+            _viewer.setOpacity(1.0);
+            setState(() => _isDismissAnimating = false);
+          }),
+    );
   }
 
   void _onDragStart(
@@ -249,18 +361,20 @@ class _AssetPageState extends ConsumerState<AssetPage> {
 
   void _onDragCancel() => _endDrag(DragEndDetails(primaryVelocity: 0.0));
 
-  void _handleDragDown(BuildContext context, Offset delta) {
-    const dragRatio = 0.2;
-
-    final distance = delta.dy.abs();
-    final maxScaleDistance = context.height * 0.5;
-    final scaleReduction = (distance / maxScaleDistance).clamp(0.0, dragRatio);
+  void _updateDismiss(Offset delta, double distance, Offset focalPoint) {
+    // Half the size after dragging the screen height, at most down to 40%
+    final scaleReduction = (distance / context.height * 0.5).clamp(0.0, 0.6);
     final initialScale = _viewController?.initialScale ?? _initialPhotoViewState.scale;
     final updatedScale = initialScale != null ? initialScale * (1.0 - scaleReduction) : null;
 
-    final opacity = 1.0 - (scaleReduction / dragRatio);
+    // Shrinks towards the point under the finger instead of the center of the asset. Positions are relative to the
+    // center of the viewport
+    final focalOffset = focalPoint - MediaQuery.sizeOf(context).center(Offset.zero) - _initialPhotoViewState.position;
+    final position = _initialPhotoViewState.position + delta + focalOffset * scaleReduction;
 
-    _viewController?.updateMultiple(position: _initialPhotoViewState.position + delta, scale: updatedScale);
+    final opacity = (1.0 - distance / (context.height * 0.5)).clamp(0.0, 1.0);
+
+    _viewController?.updateMultiple(position: position, scale: updatedScale);
     _viewer.setOpacity(opacity);
   }
 
@@ -436,6 +550,10 @@ class _AssetPageState extends ConsumerState<AssetPage> {
       assetViewerProvider.select((s) => (s.currentAsset, s.thumbnailSize)),
     );
     _showingDetails = ref.watch(assetViewerProvider.select((s) => s.showingDetails));
+    if (_showingDetails) {
+      _keepDetails = true;
+    }
+    final detailsVisible = _showingDetails || _keepDetails;
     final stackIndex = ref.watch(assetViewerProvider.select((s) => s.stackIndex));
     final liveMotionPlaying = ref.watch(isPlayingMotionVideoProvider);
     // Preserve the playback status while dismissing to prevent switching views mid-animation.
@@ -475,13 +593,13 @@ class _AssetPageState extends ConsumerState<AssetPage> {
 
     final viewIntentFilePath = timelineOrigin == TimelineOrigin.deepLink ? ref.watch(viewIntentFilePathProvider) : null;
 
-    return Stack(
+    final page = Stack(
       children: [
         SingleChildScrollView(
           controller: _scrollController,
           physics: const SnapScrollPhysics(parent: ClampingScrollPhysics()),
           child: ColoredBox(
-            color: _showingDetails ? Colors.black : Colors.transparent,
+            color: detailsVisible ? Colors.black : Colors.transparent,
             child: Stack(
               children: [
                 SizedBox(
@@ -490,7 +608,10 @@ class _AssetPageState extends ConsumerState<AssetPage> {
                   child: _buildPhotoView(
                     asset: displayAsset,
                     heroAttributes: isCurrent
-                        ? PhotoViewHeroAttributes(tag: '${asset.heroTag}_${widget.heroOffset}')
+                        ? PhotoViewHeroAttributes(
+                            tag: '${asset.heroTag}_${widget.heroOffset}',
+                            transitionOnUserGestures: true,
+                          )
                         : null,
                     isCurrent: isCurrent,
                     isPlayingMotionVideo: isPlayingMotionVideo,
@@ -512,17 +633,24 @@ class _AssetPageState extends ConsumerState<AssetPage> {
                   child: Column(
                     children: [
                       SizedBox(height: detailsOffset),
-                      GestureDetector(
-                        onVerticalDragStart: _beginDrag,
-                        onVerticalDragUpdate: _updateDrag,
-                        onVerticalDragEnd: _endDrag,
-                        onVerticalDragCancel: _onDragCancel,
-                        child: AnimatedOpacity(
-                          opacity: _showingDetails ? 1.0 : 0.0,
-                          duration: Durations.short2,
-                          child: _showingDetails
-                              ? AssetDetails(asset: displayAsset, minHeight: viewportHeight - snapTarget)
-                              : SizedBox(height: viewportHeight - snapTarget),
+                      ListenableBuilder(
+                        listenable: _scrollController,
+                        builder: (context, child) => Transform.translate(
+                          offset: Offset(0, _detailsShift(viewportHeight, detailsOffset)),
+                          child: child,
+                        ),
+                        child: GestureDetector(
+                          onVerticalDragStart: _beginDrag,
+                          onVerticalDragUpdate: _updateDrag,
+                          onVerticalDragEnd: _endDrag,
+                          onVerticalDragCancel: _onDragCancel,
+                          child: AnimatedOpacity(
+                            opacity: detailsVisible ? 1.0 : 0.0,
+                            duration: Durations.short2,
+                            child: detailsVisible
+                                ? AssetDetails(asset: displayAsset, minHeight: viewportHeight - snapTarget)
+                                : SizedBox(height: viewportHeight - snapTarget),
+                          ),
                         ),
                       ),
                     ],
@@ -540,6 +668,17 @@ class _AssetPageState extends ConsumerState<AssetPage> {
             child: AssetStackRow(stack: stackChildren),
           ),
       ],
+    );
+
+    return PredictiveBackScope(
+      // Zoomed assets can't be dragged to dismiss, the route fades out instead
+      enabled: isCurrent && (_showingDetails || (!_isZoomed && _viewController != null)),
+      interceptsPop: _showingDetails,
+      onBack: _onBack,
+      onStart: _onBackStart,
+      onProgress: _onBackProgress,
+      onCancel: _onBackCancel,
+      child: page,
     );
   }
 }

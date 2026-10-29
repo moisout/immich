@@ -157,7 +157,11 @@ class AppRouter extends RootStackRouter {
           settings: page,
           pageBuilder: (_, _, _) => child,
           opaque: false,
-          transitionsBuilder: TransitionsBuilders.fadeIn,
+          // Keeps the black background longer while closing
+          transitionsBuilder: (_, animation, _, child) => FadeTransition(
+            opacity: animation.drive(CurveTween(curve: Curves.easeOutCubic)),
+            child: child,
+          ),
         ),
       ),
     ),
