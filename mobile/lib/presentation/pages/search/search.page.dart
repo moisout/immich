@@ -623,11 +623,21 @@ class SearchPage extends HookConsumerWidget {
         decoration: BoxDecoration(
           border: Border.all(color: context.colorScheme.onSurface.withAlpha(0), width: 0),
           borderRadius: const BorderRadius.all(Radius.circular(24)),
+          // Opaque like the filter chips, as the results scroll underneath the search bar
           gradient: LinearGradient(
             colors: [
-              context.colorScheme.primary.withValues(alpha: 0.075),
-              context.colorScheme.primary.withValues(alpha: 0.09),
-              context.colorScheme.primary.withValues(alpha: 0.075),
+              Color.alphaBlend(
+                context.colorScheme.primary.withValues(alpha: 0.075),
+                context.colorScheme.surfaceContainerLow,
+              ),
+              Color.alphaBlend(
+                context.colorScheme.primary.withValues(alpha: 0.09),
+                context.colorScheme.surfaceContainerLow,
+              ),
+              Color.alphaBlend(
+                context.colorScheme.primary.withValues(alpha: 0.075),
+                context.colorScheme.surfaceContainerLow,
+              ),
             ],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
