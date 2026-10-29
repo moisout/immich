@@ -1,6 +1,7 @@
 import 'package:auto_route/auto_route.dart';
 import 'package:flutter/material.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
+import 'package:immich_mobile/constants/constants.dart';
 import 'package:immich_mobile/data/store.dart';
 import 'package:immich_mobile/domain/models/user.model.dart';
 import 'package:immich_mobile/extensions/asyncvalue_extensions.dart';
@@ -18,6 +19,7 @@ import 'package:immich_mobile/providers/user.provider.dart';
 import 'package:immich_mobile/routing/router.dart';
 import 'package:immich_mobile/utils/image_url_builder.dart';
 import 'package:immich_mobile/widgets/common/immich_sliver_app_bar.dart';
+import 'package:immich_mobile/widgets/common/tab_top_bar.dart';
 import 'package:immich_mobile/widgets/map/map_thumbnail.dart';
 import 'package:maplibre_gl/maplibre_gl.dart';
 
@@ -27,14 +29,13 @@ class LibraryPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
-      body: CustomScrollView(
-        slivers: [
-          ImmichSliverAppBar(snap: false, floating: false, pinned: true, showUploadButton: false),
-          _ActionButtonGrid(),
-          _CollectionCards(),
-          _QuickAccessButtonList(),
-        ],
+    return const TabTopBar(
+      tabIndex: kLibraryTabIndex,
+      bar: ImmichTabTopBar(showUploadButton: false),
+      child: Scaffold(
+        body: CustomScrollView(
+          slivers: [SliverTabTopBarSpacer(), _ActionButtonGrid(), _CollectionCards(), _QuickAccessButtonList()],
+        ),
       ),
     );
   }

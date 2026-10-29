@@ -47,6 +47,7 @@ class Timeline extends ConsumerWidget {
     this.readOnly = false,
     this.persistentBottomBar = false,
     this.loadingWidget,
+    this.topBarBackground,
   });
 
   final Widget? topSliverWidget;
@@ -62,6 +63,9 @@ class Timeline extends ConsumerWidget {
   final bool readOnly;
   final bool persistentBottomBar;
   final Widget? loadingWidget;
+
+  /// Background of a top bar overlaying the timeline, placed between the grid and the controls floating over it
+  final Widget? topBarBackground;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -95,6 +99,7 @@ class Timeline extends ConsumerWidget {
             snapToMonth: snapToMonth,
             maxWidth: constraints.maxWidth,
             loadingWidget: loadingWidget,
+            topBarBackground: topBarBackground,
           ),
         );
       },
@@ -125,6 +130,7 @@ class _SliverTimeline extends ConsumerStatefulWidget {
     this.snapToMonth = true,
     this.maxWidth,
     this.loadingWidget,
+    this.topBarBackground,
   });
 
   final Widget? topSliverWidget;
@@ -137,6 +143,7 @@ class _SliverTimeline extends ConsumerStatefulWidget {
   final bool snapToMonth;
   final double? maxWidth;
   final Widget? loadingWidget;
+  final Widget? topBarBackground;
 
   @override
   ConsumerState createState() => _SliverTimelineState();
@@ -513,6 +520,8 @@ class _SliverTimelineState extends ConsumerState<_SliverTimeline> with WidgetsBi
                             onNotification: _onScrollVelocityNotification,
                             child: timeline,
                           ),
+                          if (widget.topBarBackground != null)
+                            Positioned(top: 0, left: 0, right: 0, child: widget.topBarBackground!),
                           if (isBottomWidgetVisible)
                             Positioned(
                               top: MediaQuery.paddingOf(context).top,

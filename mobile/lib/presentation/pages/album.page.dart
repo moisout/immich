@@ -3,11 +3,13 @@ import 'dart:async';
 import 'package:auto_route/auto_route.dart';
 import 'package:flutter/material.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
+import 'package:immich_mobile/constants/constants.dart';
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
 import 'package:immich_mobile/presentation/widgets/album/album_selector.widget.dart';
 import 'package:immich_mobile/providers/infrastructure/album.provider.dart';
 import 'package:immich_mobile/routing/router.dart';
 import 'package:immich_mobile/widgets/common/immich_sliver_app_bar.dart';
+import 'package:immich_mobile/widgets/common/tab_top_bar.dart';
 
 @RoutePage()
 class AlbumsPage extends ConsumerStatefulWidget {
@@ -39,18 +41,7 @@ class _AlbumsPageState extends ConsumerState<AlbumsPage> {
       controller: _scrollController,
       physics: const AlwaysScrollableScrollPhysics(),
       slivers: [
-        ImmichSliverAppBar(
-          snap: false,
-          floating: false,
-          pinned: true,
-          actions: [
-            IconButton(
-              onPressed: () => context.pushRoute(const CreateAlbumRoute()),
-              icon: const Icon(Icons.add_rounded),
-            ),
-          ],
-          showUploadButton: false,
-        ),
+        const SliverTabTopBarSpacer(),
         AlbumSelector(
           onAlbumSelected: (album) {
             unawaited(context.router.push(RemoteAlbumRoute(album: album)));
@@ -59,7 +50,7 @@ class _AlbumsPageState extends ConsumerState<AlbumsPage> {
       ],
     );
 
-    return RefreshIndicator(
+    final content = RefreshIndicator(
       onRefresh: onRefresh,
       edgeOffset: 100,
       child: showScrollbar
@@ -76,6 +67,17 @@ class _AlbumsPageState extends ConsumerState<AlbumsPage> {
               child: scrollView,
             )
           : scrollView,
+    );
+
+    return TabTopBar(
+      tabIndex: kAlbumTabIndex,
+      bar: ImmichTabTopBar(
+        actions: [
+          IconButton(onPressed: () => context.pushRoute(const CreateAlbumRoute()), icon: const Icon(Icons.add_rounded)),
+        ],
+        showUploadButton: false,
+      ),
+      child: content,
     );
   }
 }

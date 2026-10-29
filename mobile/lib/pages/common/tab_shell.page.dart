@@ -16,6 +16,7 @@ import 'package:immich_mobile/providers/infrastructure/readonly_mode.provider.da
 import 'package:immich_mobile/providers/search/search_input_focus.provider.dart';
 import 'package:immich_mobile/providers/tab.provider.dart';
 import 'package:immich_mobile/routing/router.dart';
+import 'package:immich_mobile/widgets/common/tab_top_bar.dart';
 
 @RoutePage()
 class TabShellPage extends ConsumerStatefulWidget {
@@ -127,15 +128,23 @@ class _TabShellPageState extends ConsumerState<TabShellPage> {
     return AutoTabsRouter.pageView(
       routes: const [MainTimelineRoute(), SearchRoute(), AlbumsRoute(), LibraryRoute()],
       physics: canSwipe ? null : const NeverScrollableScrollPhysics(),
-      builder: (context, pageView, _) {
+      builder: (context, pageView, pageController) {
         final tabsRouter = AutoTabsRouter.of(context);
-        final child = Listener(
-          onPointerDown: (_) => _onPointerCountChanged(1),
-          onPointerUp: (_) => _onPointerCountChanged(-1),
-          onPointerCancel: (_) => _onPointerCountChanged(-1),
-          child: NotificationListener<ScrollNotification>(
-            onNotification: (notification) => _onPageScrollNotification(notification, tabsRouter),
-            child: pageView,
+        final child = LayoutBuilder(
+          builder: (context, constraints) => TabTopBarScope(
+            pageController: pageController,
+            activeIndex: tabsRouter.activeIndex,
+            // The pages are aligned to the right, next to the navigation rail in landscape
+            leftInset: MediaQuery.sizeOf(context).width - constraints.maxWidth,
+            child: Listener(
+              onPointerDown: (_) => _onPointerCountChanged(1),
+              onPointerUp: (_) => _onPointerCountChanged(-1),
+              onPointerCancel: (_) => _onPointerCountChanged(-1),
+              child: NotificationListener<ScrollNotification>(
+                onNotification: (notification) => _onPageScrollNotification(notification, tabsRouter),
+                child: pageView,
+              ),
+            ),
           ),
         );
         return PopScope(

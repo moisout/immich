@@ -20,6 +20,7 @@ import 'package:immich_mobile/providers/user.provider.dart';
 import 'package:immich_mobile/routing/router.dart';
 import 'package:immich_mobile/widgets/asset_viewer/cast_dialog.dart';
 import 'package:immich_mobile/widgets/common/app_bar_dialog/app_bar_dialog.dart';
+import 'package:immich_mobile/widgets/common/tab_top_bar.dart';
 import 'package:immich_mobile/widgets/common/user_circle_avatar.dart';
 
 class ImmichSliverAppBar extends ConsumerWidget {
@@ -66,18 +67,69 @@ class ImmichSliverAppBar extends ConsumerWidget {
           automaticallyImplyLeading: false,
           centerTitle: false,
           title: title ?? const _ImmichLogoWithText(),
-          actions: [
-            const _SyncStatusIndicator(),
-            if (isCasting && !isReadonlyModeEnabled)
-              IconButton(
-                onPressed: () => showDialog(context: context, builder: (context) => const CastDialog()),
-                icon: Icon(isCasting ? Icons.cast_connected_rounded : Icons.cast_rounded),
-              ),
-            ...?actions,
-            if (showUploadButton && !isReadonlyModeEnabled) const _BackupIndicator(),
-            const _ProfileIndicator(),
-            const SizedBox(width: 8),
-          ],
+          actions: _buildActions(
+            context,
+            isCasting: isCasting,
+            isReadonlyModeEnabled: isReadonlyModeEnabled,
+            showUploadButton: showUploadButton,
+            actions: actions,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+List<Widget> _buildActions(
+  BuildContext context, {
+  required bool isCasting,
+  required bool isReadonlyModeEnabled,
+  required bool showUploadButton,
+  List<Widget>? actions,
+}) => [
+  const _SyncStatusIndicator(),
+  if (isCasting && !isReadonlyModeEnabled)
+    IconButton(
+      onPressed: () => showDialog(context: context, builder: (context) => const CastDialog()),
+      icon: Icon(isCasting ? Icons.cast_connected_rounded : Icons.cast_rounded),
+    ),
+  ...?actions,
+  if (showUploadButton && !isReadonlyModeEnabled) const _BackupIndicator(),
+  const _ProfileIndicator(),
+  const SizedBox(width: 8),
+];
+
+/// The app bar of [ImmichSliverAppBar] with a transparent background, for a [TabTopBar] overlaying the page
+class ImmichTabTopBar extends ConsumerWidget {
+  final List<Widget>? actions;
+  final bool showUploadButton;
+
+  const ImmichTabTopBar({super.key, this.actions, this.showUploadButton = true});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final isCasting = ref.watch(castProvider.select((c) => c.isCasting));
+    final isReadonlyModeEnabled = ref.watch(readonlyModeProvider);
+    final isMultiSelectEnabled = ref.watch(multiSelectProvider.select((s) => s.isEnabled));
+
+    return IgnorePointer(
+      ignoring: isMultiSelectEnabled,
+      child: AnimatedOpacity(
+        duration: Durations.medium1,
+        opacity: isMultiSelectEnabled ? 0 : 1,
+        child: AppBar(
+          forceMaterialTransparency: true,
+          systemOverlayStyle: tabTopBarOverlayStyle(context),
+          automaticallyImplyLeading: false,
+          centerTitle: false,
+          title: const _ImmichLogoWithText(),
+          actions: _buildActions(
+            context,
+            isCasting: isCasting,
+            isReadonlyModeEnabled: isReadonlyModeEnabled,
+            showUploadButton: showUploadButton,
+            actions: actions,
+          ),
         ),
       ),
     );
