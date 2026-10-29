@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -10,9 +11,8 @@ const double kTabTopBarHeight = kToolbarHeight;
 /// Extra height below the top bar over which its blur fades out
 const double _kTabTopBarFadeExtent = 32;
 
-/// Blur strengths of the stacked layers making up the progressive blur, from the full height to the topmost layer.
-/// The layers blur on top of each other, so the blur is strongest at the top
-const List<double> _kBlurSigmas = [0.5, 1, 1.5, 2, 3, 4];
+/// Blur strength at the top of the top bar, fading out towards its bottom
+const double _kMaxBlurSigma = 8;
 
 /// Provided by the tab shell, used to fix the top bars of its pages in place and cross-fade them while switching pages
 class TabTopBarScope extends InheritedWidget {
@@ -125,46 +125,84 @@ class _TabTopBarState extends State<TabTopBar> {
 }
 
 /// Progressive blur behind the top bar, strongest at the top and fading out below the bar
-class TabTopBarBackground extends StatelessWidget {
+class TabTopBarBackground extends StatefulWidget {
   const TabTopBarBackground({super.key});
+
+  @override
+  State<TabTopBarBackground> createState() => _TabTopBarBackgroundState();
+}
+
+class _TabTopBarBackgroundState extends State<TabTopBarBackground> {
+  static ui.FragmentProgram? _program;
+  static final Future<ui.FragmentProgram?> _programLoader = ui.ImageFilter.isShaderFilterSupported
+      ? ui.FragmentProgram.fromAsset(
+          'shaders/progressive_blur.frag',
+        ).then<ui.FragmentProgram?>((program) => _program = program, onError: (_) => null)
+      : Future.value(null);
+
+  @override
+  void initState() {
+    super.initState();
+    if (_program == null) {
+      unawaited(
+        _programLoader.then((_) {
+          if (mounted) {
+            setState(() {});
+          }
+        }),
+      );
+    }
+  }
+
+  /// A single filter blurring with a strength fading out from the top, in a horizontal and a vertical pass
+  ui.ImageFilter _progressiveBlur(ui.FragmentProgram program, double height) {
+    final pixelRatio = MediaQuery.devicePixelRatioOf(context);
+    ui.ImageFilter pass(double dx, double dy) {
+      final shader = program.fragmentShader()
+        // The first two floats are the input size, set by the engine
+        ..setFloat(2, dx)
+        ..setFloat(3, dy)
+        ..setFloat(4, _kMaxBlurSigma * pixelRatio)
+        ..setFloat(5, height * pixelRatio);
+      return ui.ImageFilter.shader(shader);
+    }
+
+    return ui.ImageFilter.compose(outer: pass(0, 1), inner: pass(1, 0));
+  }
 
   @override
   Widget build(BuildContext context) {
     final height = context.padding.top + kTabTopBarHeight + _kTabTopBarFadeExtent;
     final surface = context.colorScheme.surface;
+    final program = _program;
 
     return IgnorePointer(
       child: SizedBox(
         height: height,
         child: Stack(
+          fit: StackFit.expand,
           children: [
-            for (final (index, sigma) in _kBlurSigmas.indexed)
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                height: height * (1 - index / _kBlurSigmas.length),
-                child: ClipRect(
-                  child: BackdropFilter(
-                    filter: ui.ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
-                    child: const SizedBox.expand(),
-                  ),
-                ),
+            ClipRect(
+              child: BackdropFilter(
+                // Without shader filters, fall back to a uniform blur
+                filter: program != null
+                    ? _progressiveBlur(program, height)
+                    : ui.ImageFilter.blur(sigmaX: _kMaxBlurSigma / 2, sigmaY: _kMaxBlurSigma / 2),
+                child: const SizedBox.expand(),
               ),
+            ),
             // Tints the blur for the legibility of the bar, fading out with it
-            Positioned.fill(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      surface.withValues(alpha: 0.7),
-                      surface.withValues(alpha: 0.45),
-                      surface.withValues(alpha: 0),
-                    ],
-                    stops: const [0, 0.55, 1],
-                  ),
+            DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    surface.withValues(alpha: 0.7),
+                    surface.withValues(alpha: 0.45),
+                    surface.withValues(alpha: 0),
+                  ],
+                  stops: const [0, 0.55, 1],
                 ),
               ),
             ),

@@ -125,6 +125,8 @@ dependency_overrides:
 
 flutter:
   uses-material-design: true
+  shaders:
+    - shaders/progressive_blur.frag
   assets:
     - assets/
     - assets/feature_message/
