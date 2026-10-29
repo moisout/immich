@@ -187,11 +187,14 @@ app bars from upstream don't get the treatment automatically.
 
 ### 6. Floating navigation bar
 
-The bottom navigation bar is a floating, rounded, blurred pill; the pages extend underneath it (`extendBody`).
+The bottom navigation bar is a floating, centered, blurred pill (max 340 wide); the pages extend underneath it
+(`extendBody`). The selected destination is highlighted as a whole, icon and label, which Material's `NavigationBar`
+can't do, so it is a custom row of `_FloatingNavigationItem`s built from the same `NavigationDestination`s as the
+landscape rail.
 
 | File | Edit |
 | --- | --- |
-| `mobile/lib/pages/common/tab_shell.page.dart` | `_BottomNavigationBarState.build` wraps the `NavigationBar` (transparent, height 68, bottom padding removed) in padding, shadow, clip, blur and a translucent background. `Scaffold(extendBody: true)` |
+| `mobile/lib/pages/common/tab_shell.page.dart` | `_BottomNavigationBarState.build` replaces the `NavigationBar` with the floating pill and `_FloatingNavigationItem`. `Scaffold(extendBody: true)` |
 | `album.page.dart`, `library.page.dart`, `search.page.dart` | `SliverTabBottomSpacer` at the end of their scroll views. Timelines already pad by the bottom inset |
 
 A new scrolling tab page from upstream needs a `SliverTabBottomSpacer` (or bottom inset padding), or its last items
@@ -204,7 +207,7 @@ end up behind the bar.
 | `.../widgets/timeline/timeline.widget.dart` | 3, 4 | High | Take theirs, re-apply the 7 points of change 3 |
 | `.../widgets/timeline/timeline_pinch_zoom.dart` | 3 | High if upstream touches zoom | Keep ours, port upstream fixes by hand |
 | `.../pages/search/search.page.dart` | 4 | High | Take theirs, move app bar and chips into `TabTopBar` |
-| `mobile/lib/pages/common/tab_shell.page.dart` | 2, 4, 6 | Medium | Merge by hand, the edits are in separate places |
+| `mobile/lib/pages/common/tab_shell.page.dart` | 2, 4, 6 | Medium | Merge by hand, the edits are in separate places. New destinations or tab side effects from upstream must also reach `_FloatingNavigationItem` (it reads `icon`, `selectedIcon`, `label`, `enabled`) |
 | `.../widgets/timeline/sliver_segmented_list.dart` | 3 | Medium | Keep the paint override, merge layout changes |
 | `mesmerizing` / `remote_album` / `person_sliver_app_bar.dart` | 5 | Medium | Take theirs, re-apply the three edits |
 | `immich_sliver_app_bar.dart` | 4 | Low | New actions go into `_buildActions` |

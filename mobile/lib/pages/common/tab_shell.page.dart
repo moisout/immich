@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:ui';
 
 import 'package:auto_route/auto_route.dart';
@@ -79,7 +80,7 @@ class _TabShellPageState extends ConsumerState<TabShellPage> {
     final isScreenLandscape = context.orientation == Orientation.landscape;
     final isReadonlyModeEnabled = ref.watch(readonlyModeProvider);
 
-    final navigationDestinations = [
+    final navigationDestinations = <NavigationDestination>[
       NavigationDestination(
         label: context.t.photos,
         icon: const Icon(Icons.photo_library_outlined),
@@ -209,7 +210,7 @@ void _onTabSelected(int previousIndex, int index, WidgetRef ref) {
 class _BottomNavigationBar extends ConsumerStatefulWidget {
   const _BottomNavigationBar({required this.tabsRouter, required this.destinations});
 
-  final List<Widget> destinations;
+  final List<NavigationDestination> destinations;
   final TabsRouter tabsRouter;
 
   @override
@@ -247,40 +248,50 @@ class _BottomNavigationBarState extends ConsumerState<_BottomNavigationBar> {
     }
 
     final background = context.themeData.navigationBarTheme.backgroundColor ?? context.colorScheme.surfaceContainer;
-    const borderRadius = BorderRadius.all(Radius.circular(_kFloatingNavigationBarRadius));
+    const borderRadius = BorderRadius.all(Radius.circular(_kFloatingNavigationBarHeight / 2));
 
     // Floats over the pages, which extend underneath it
     return Padding(
-      padding: EdgeInsets.fromLTRB(16, 0, 16, context.padding.bottom + 12),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          borderRadius: borderRadius,
-          boxShadow: [
-            BoxShadow(color: Colors.black.withValues(alpha: 0.2), blurRadius: 16, offset: const Offset(0, 4)),
-          ],
-        ),
-        child: ClipRRect(
-          borderRadius: borderRadius,
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: background.withValues(alpha: 0.75),
-                borderRadius: borderRadius,
-                border: Border.all(color: context.colorScheme.outlineVariant.withValues(alpha: 0.3)),
-              ),
-              // The safe area is already taken into account by the padding around the bar
-              child: MediaQuery.removePadding(
-                context: context,
-                removeBottom: true,
-                child: NavigationBar(
-                  height: 68,
-                  backgroundColor: Colors.transparent,
-                  surfaceTintColor: Colors.transparent,
-                  elevation: 0,
-                  selectedIndex: widget.tabsRouter.activeIndex,
-                  onDestinationSelected: (index) => _onNavigationSelected(widget.tabsRouter, index, ref),
-                  destinations: widget.destinations,
+      padding: EdgeInsets.only(bottom: context.padding.bottom + 12),
+      child: Center(
+        heightFactor: 1,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: math.min(_kFloatingNavigationBarMaxWidth, context.width - 32)),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              borderRadius: borderRadius,
+              boxShadow: [
+                BoxShadow(color: Colors.black.withValues(alpha: 0.2), blurRadius: 16, offset: const Offset(0, 4)),
+              ],
+            ),
+            child: ClipRRect(
+              borderRadius: borderRadius,
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: background.withValues(alpha: 0.75),
+                    borderRadius: borderRadius,
+                    border: Border.all(color: context.colorScheme.outlineVariant.withValues(alpha: 0.3)),
+                  ),
+                  child: SizedBox(
+                    height: _kFloatingNavigationBarHeight,
+                    child: Padding(
+                      padding: const EdgeInsets.all(_kFloatingNavigationBarPadding),
+                      child: Row(
+                        children: [
+                          for (final (index, destination) in widget.destinations.indexed)
+                            Expanded(
+                              child: _FloatingNavigationItem(
+                                destination: destination,
+                                isSelected: widget.tabsRouter.activeIndex == index,
+                                onTap: () => _onNavigationSelected(widget.tabsRouter, index, ref),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -291,4 +302,69 @@ class _BottomNavigationBarState extends ConsumerState<_BottomNavigationBar> {
   }
 }
 
-const double _kFloatingNavigationBarRadius = 28;
+const double _kFloatingNavigationBarHeight = 68;
+const double _kFloatingNavigationBarPadding = 6;
+const double _kFloatingNavigationBarMaxWidth = 340;
+
+/// A destination of the floating navigation bar, highlighted as a whole (icon and label) when selected
+class _FloatingNavigationItem extends StatelessWidget {
+  const _FloatingNavigationItem({required this.destination, required this.isSelected, required this.onTap});
+
+  final NavigationDestination destination;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = context.colorScheme;
+    final foreground = isSelected ? colorScheme.onSecondaryContainer : colorScheme.onSurfaceVariant;
+    const shape = StadiumBorder();
+
+    return Semantics(
+      button: true,
+      selected: isSelected,
+      enabled: destination.enabled,
+      label: destination.label,
+      excludeSemantics: true,
+      child: Opacity(
+        opacity: destination.enabled ? 1 : 0.38,
+        child: Material(
+          type: MaterialType.transparency,
+          child: InkWell(
+            customBorder: shape,
+            onTap: destination.enabled ? onTap : null,
+            child: AnimatedContainer(
+              duration: Durations.short4,
+              curve: Curves.easeOut,
+              decoration: ShapeDecoration(
+                shape: shape,
+                color: isSelected
+                    ? colorScheme.secondaryContainer
+                    : colorScheme.secondaryContainer.withValues(alpha: 0),
+              ),
+              child: IconTheme.merge(
+                data: IconThemeData(color: foreground, size: 24),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    isSelected ? destination.selectedIcon ?? destination.icon : destination.icon,
+                    const SizedBox(height: 2),
+                    Text(
+                      destination.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: context.textTheme.labelMedium?.copyWith(
+                        color: foreground,
+                        fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
