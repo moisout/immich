@@ -145,6 +145,10 @@ class _SliverTimelineState extends ConsumerState<_SliverTimeline> with WidgetsBi
   StreamSubscription? _eventSubscription;
 
   int? _restoreAssetIndex;
+  // Added to the restored asset row's offset, keeps a zoomed asset under the fingers instead of at the top
+  double _restoreScrollAdjustment = 0;
+  Completer<void>? _restoreCompleter;
+  bool _isZooming = false;
 
   final Debouncer _fastScrollDebouncer = Debouncer(interval: const Duration(milliseconds: 100));
 
@@ -208,22 +212,54 @@ class _SliverTimelineState extends ConsumerState<_SliverTimeline> with WidgetsBi
     }
 
     final asyncSegments = ref.read(timelineSegmentProvider);
+    final completer = _restoreCompleter;
+    final scrollAdjustment = _restoreScrollAdjustment;
     asyncSegments.whenData((segments) {
-      final targetSegment = segments.lastWhereOrNull((segment) => segment.firstAssetIndex <= _restoreAssetIndex!);
-      if (targetSegment != null) {
-        final assetIndexInSegment = _restoreAssetIndex! - targetSegment.firstAssetIndex;
-        final newColumnCount = ref.read(timelineArgsProvider).columnCount;
-        final rowIndexInSegment = (assetIndexInSegment / newColumnCount).floor();
-        final targetRowIndex = targetSegment.firstIndex + 1 + rowIndexInSegment;
-        final targetOffset = targetSegment.indexToLayoutOffset(targetRowIndex);
+      final rowOffset = _getAssetRowOffset(segments, _restoreAssetIndex!);
+      if (rowOffset != null) {
+        final targetOffset = rowOffset + scrollAdjustment;
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) {
             _scrollController.jumpTo(targetOffset.clamp(0.0, _scrollController.position.maxScrollExtent));
           }
+          completer?.complete();
         });
       }
     });
     _restoreAssetIndex = null;
+    _restoreScrollAdjustment = 0;
+    _restoreCompleter = null;
+  }
+
+  double? _getAssetRowOffset(List<Segment> segments, int assetIndex) {
+    final segment = segments.lastWhereOrNull((segment) => segment.firstAssetIndex <= assetIndex);
+    if (segment == null) {
+      return null;
+    }
+    final columnCount = ref.read(timelineArgsProvider).columnCount;
+    final rowIndexInSegment = ((assetIndex - segment.firstAssetIndex) / columnCount).floor();
+    return segment.indexToLayoutOffset(segment.firstIndex + 1 + rowIndexInSegment);
+  }
+
+  Future<void> _onColumnCountWillChange(TimelineZoomAnchor? anchor) {
+    final segments = ref.read(timelineSegmentProvider).valueOrNull;
+    if (segments == null || !_scrollController.hasClients) {
+      return Future.value();
+    }
+
+    _restoreCompleter?.complete();
+    _restoreCompleter = Completer();
+    final currentRowOffset = anchor == null ? null : _getAssetRowOffset(segments, anchor.assetIndex);
+    if (anchor != null && currentRowOffset != null) {
+      // Scroll offset at which the asset list starts, the slivers above it keep their extent across column counts
+      final listStartOffset = anchor.currentTop + _scrollController.offset - currentRowOffset;
+      _restoreAssetIndex = anchor.assetIndex;
+      _restoreScrollAdjustment = listStartOffset - anchor.targetTop;
+    } else {
+      _restoreAssetIndex = _getCurrentAssetIndex(segments);
+      _restoreScrollAdjustment = 0;
+    }
+    return _restoreCompleter!.future;
   }
 
   void _onMultiSelectionToggled(_, bool isEnabled) {
@@ -354,32 +390,29 @@ class _SliverTimelineState extends ConsumerState<_SliverTimeline> with WidgetsBi
             primary: false,
             resizeToAvoidBottomInset: false,
             floatingActionButton: const DownloadStatusFloatingButton(),
-            body: asyncSegments.widgetWhen(
-              onLoading: widget.loadingWidget != null ? () => widget.loadingWidget! : null,
-              onData: (segments) {
-                final childCount = (segments.lastOrNull?.lastIndex ?? -1) + 1;
-                final double appBarExpandedHeight = widget.appBar != null && widget.appBar is MesmerizingSliverAppBar
-                    ? 200
-                    : 0;
-                final topPadding = context.padding.top + (widget.appBar == null ? 0 : kToolbarHeight) + 10;
+            body: TimelinePinchZoom(
+              onColumnCountWillChange: _onColumnCountWillChange,
+              onZoomingChanged: (isZooming) => setState(() => _isZooming = isZooming),
+              child: asyncSegments.widgetWhen(
+                onLoading: widget.loadingWidget != null ? () => widget.loadingWidget! : null,
+                onData: (segments) {
+                  final childCount = (segments.lastOrNull?.lastIndex ?? -1) + 1;
+                  final double appBarExpandedHeight = widget.appBar != null && widget.appBar is MesmerizingSliverAppBar
+                      ? 200
+                      : 0;
+                  final topPadding = context.padding.top + (widget.appBar == null ? 0 : kToolbarHeight) + 10;
 
-                const bottomSheetOpenModifier = 120.0;
-                final contentBottomPadding =
-                    context.padding.bottom + (isMultiSelectEnabled ? bottomSheetOpenModifier : 0);
-                final scrubberBottomPadding = contentBottomPadding + kScrubberThumbHeight;
+                  const bottomSheetOpenModifier = 120.0;
+                  final contentBottomPadding =
+                      context.padding.bottom + (isMultiSelectEnabled ? bottomSheetOpenModifier : 0);
+                  final scrubberBottomPadding = contentBottomPadding + kScrubberThumbHeight;
 
-                return TimelinePinchZoom(
-                  onColumnCountWillChange: () {
-                    final targetAssetIndex = _getCurrentAssetIndex(segments);
-                    setState(() {
-                      _restoreAssetIndex = targetAssetIndex;
-                    });
-                  },
-                  child: TimelineDragSelection(
+                  return TimelineDragSelection(
                     builder: (physics) {
                       final grid = CustomScrollView(
                         primary: true,
-                        physics: physics,
+                        // Scrolling would move the content out from under the fingers while zooming
+                        physics: _isZooming ? const NeverScrollableScrollPhysics() : physics,
                         scrollCacheExtent: .pixels(maxHeight * 2),
                         slivers: [
                           if (isSelectionMode)
@@ -444,9 +477,9 @@ class _SliverTimelineState extends ConsumerState<_SliverTimeline> with WidgetsBi
                         ],
                       );
                     },
-                  ),
-                );
-              },
+                  );
+                },
+              ),
             ),
           ),
         ),
