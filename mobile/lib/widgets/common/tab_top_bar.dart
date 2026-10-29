@@ -309,6 +309,16 @@ class SliverTabTopBarSpacer extends StatelessWidget {
   }
 }
 
+/// Space at the bottom of a tab page's scroll view, for the navigation bar floating over the content
+class SliverTabBottomSpacer extends StatelessWidget {
+  const SliverTabBottomSpacer({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return SliverToBoxAdapter(child: SizedBox(height: context.padding.bottom));
+  }
+}
+
 /// Status bar icons matching the theme, as the top bar is transparent
 SystemUiOverlayStyle tabTopBarOverlayStyle(BuildContext context) =>
     context.isDarkTheme ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark;

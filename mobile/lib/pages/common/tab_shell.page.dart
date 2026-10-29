@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui';
 
 import 'package:auto_route/auto_route.dart';
 import 'package:flutter/material.dart';
@@ -152,6 +153,8 @@ class _TabShellPageState extends ConsumerState<TabShellPage> {
           onPopInvokedWithResult: (didPop, _) => !didPop ? tabsRouter.setActiveIndex(0) : null,
           child: Scaffold(
             resizeToAvoidBottomInset: false,
+            // The navigation bar floats over the pages
+            extendBody: true,
             body: isScreenLandscape
                 ? Row(
                     children: [
@@ -243,10 +246,49 @@ class _BottomNavigationBarState extends ConsumerState<_BottomNavigationBar> {
       return const SizedBox.shrink();
     }
 
-    return NavigationBar(
-      selectedIndex: widget.tabsRouter.activeIndex,
-      onDestinationSelected: (index) => _onNavigationSelected(widget.tabsRouter, index, ref),
-      destinations: widget.destinations,
+    final background = context.themeData.navigationBarTheme.backgroundColor ?? context.colorScheme.surfaceContainer;
+    const borderRadius = BorderRadius.all(Radius.circular(_kFloatingNavigationBarRadius));
+
+    // Floats over the pages, which extend underneath it
+    return Padding(
+      padding: EdgeInsets.fromLTRB(16, 0, 16, context.padding.bottom + 12),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: borderRadius,
+          boxShadow: [
+            BoxShadow(color: Colors.black.withValues(alpha: 0.2), blurRadius: 16, offset: const Offset(0, 4)),
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: borderRadius,
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: background.withValues(alpha: 0.75),
+                borderRadius: borderRadius,
+                border: Border.all(color: context.colorScheme.outlineVariant.withValues(alpha: 0.3)),
+              ),
+              // The safe area is already taken into account by the padding around the bar
+              child: MediaQuery.removePadding(
+                context: context,
+                removeBottom: true,
+                child: NavigationBar(
+                  height: 68,
+                  backgroundColor: Colors.transparent,
+                  surfaceTintColor: Colors.transparent,
+                  elevation: 0,
+                  selectedIndex: widget.tabsRouter.activeIndex,
+                  onDestinationSelected: (index) => _onNavigationSelected(widget.tabsRouter, index, ref),
+                  destinations: widget.destinations,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
+
+const double _kFloatingNavigationBarRadius = 28;

@@ -34,7 +34,13 @@ class LibraryPage extends StatelessWidget {
       bar: ImmichTabTopBar(showUploadButton: false),
       child: Scaffold(
         body: CustomScrollView(
-          slivers: [SliverTabTopBarSpacer(), _ActionButtonGrid(), _CollectionCards(), _QuickAccessButtonList()],
+          slivers: [
+            SliverTabTopBarSpacer(),
+            _ActionButtonGrid(),
+            _CollectionCards(),
+            _QuickAccessButtonList(),
+            SliverTabBottomSpacer(),
+          ],
         ),
       ),
     );

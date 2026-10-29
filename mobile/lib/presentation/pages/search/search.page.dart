@@ -754,6 +754,7 @@ class SearchPage extends HookConsumerWidget {
             if (filter.value.isEmpty) ...[
               const SliverTabTopBarSpacer(extent: headerExtent),
               const _SearchSuggestions(),
+              const SliverTabBottomSpacer(),
             ] else
               _SearchResultGrid(onScrollEnd: () => loadMoreSearchResults(), headerExtent: headerExtent),
           ],
