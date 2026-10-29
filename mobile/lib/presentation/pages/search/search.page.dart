@@ -22,6 +22,7 @@ import 'package:immich_mobile/presentation/widgets/timeline/timeline.widget.dart
 import 'package:immich_mobile/providers/infrastructure/timeline.provider.dart';
 import 'package:immich_mobile/providers/search/search_input_focus.provider.dart';
 import 'package:immich_mobile/providers/server_info.provider.dart';
+import 'package:immich_mobile/providers/timeline/multiselect.provider.dart';
 import 'package:immich_mobile/routing/router.dart';
 import 'package:immich_mobile/widgets/common/feature_check.dart';
 import 'package:immich_mobile/widgets/common/search_field.dart';
@@ -646,85 +647,105 @@ class SearchPage extends HookConsumerWidget {
       ),
     );
 
+    // The filter chips are part of the top bar, so the results scroll underneath them too
+    final filterChips = Padding(
+      padding: const EdgeInsets.only(top: 12.0, bottom: 4.0),
+      child: SizedBox(
+        height: 50,
+        child: ListView(
+          key: const Key('search_filter_chip_list'),
+          shrinkWrap: true,
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          children: [
+            SearchFilterChip(
+              icon: Icons.people_alt_outlined,
+              onTap: showPeoplePicker,
+              label: context.t.people,
+              currentFilter: peopleCurrentFilterWidget.value,
+            ),
+            SearchFilterChip(
+              icon: Icons.location_on_outlined,
+              onTap: showLocationPicker,
+              label: context.t.search_filter_location,
+              currentFilter: locationCurrentFilterWidget.value,
+            ),
+            if (userPreferences?.tagsEnabled ?? false)
+              SearchFilterChip(
+                icon: Icons.sell_outlined,
+                onTap: showTagPicker,
+                label: context.t.tags,
+                currentFilter: tagCurrentFilterWidget.value,
+              ),
+            SearchFilterChip(
+              icon: Icons.camera_alt_outlined,
+              onTap: showCameraPicker,
+              label: context.t.camera,
+              currentFilter: cameraCurrentFilterWidget.value,
+            ),
+            SearchFilterChip(
+              icon: Icons.date_range_outlined,
+              onTap: showQuickDatePicker,
+              label: context.t.search_filter_date,
+              currentFilter: dateRangeCurrentFilterWidget.value,
+            ),
+            SearchFilterChip(
+              key: const Key('media_type_chip'),
+              icon: Icons.video_collection_outlined,
+              onTap: showMediaTypePicker,
+              label: context.t.search_filter_media_type,
+              currentFilter: mediaTypeCurrentFilterWidget.value,
+            ),
+            if (userPreferences?.ratingsEnabled ?? false)
+              SearchFilterChip(
+                icon: Icons.star_outline_rounded,
+                onTap: showStarRatingPicker,
+                label: context.t.search_filter_star_rating,
+                currentFilter: ratingCurrentFilterWidget.value,
+              ),
+            SearchFilterChip(
+              icon: Icons.display_settings_outlined,
+              onTap: showDisplayOptionPicker,
+              label: context.t.search_filter_display_options,
+              currentFilter: displayOptionCurrentFilterWidget.value,
+            ),
+          ],
+        ),
+      ),
+    );
+    const headerExtent = kTabTopBarHeight + _kFilterChipsExtent;
+    final isShowingResults =
+        !filter.value.isEmpty && ref.watch(paginatedSearchProvider.select((s) => s.assets.isNotEmpty || s.isLoading));
+    final isMultiSelectEnabled = ref.watch(multiSelectProvider.select((s) => s.isEnabled));
+
     return TabTopBar(
       tabIndex: kSearchTabIndex,
-      bar: appBar,
+      extent: headerExtent,
+      // The results timeline places the background itself, below its multi-select controls
+      withBackground: !isShowingResults,
+      bar: IgnorePointer(
+        ignoring: isMultiSelectEnabled,
+        child: AnimatedOpacity(
+          duration: Durations.medium1,
+          opacity: isMultiSelectEnabled ? 0 : 1,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SizedBox(height: context.padding.top + kTabTopBarHeight, child: appBar),
+              filterChips,
+            ],
+          ),
+        ),
+      ),
       child: Scaffold(
         resizeToAvoidBottomInset: false,
         body: CustomScrollView(
           slivers: [
-            const SliverTabTopBarSpacer(),
-            SliverPadding(
-              padding: const EdgeInsets.only(top: 12.0, bottom: 4.0),
-              sliver: SliverToBoxAdapter(
-                child: SizedBox(
-                  height: 50,
-                  child: ListView(
-                    key: const Key('search_filter_chip_list'),
-                    shrinkWrap: true,
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    children: [
-                      SearchFilterChip(
-                        icon: Icons.people_alt_outlined,
-                        onTap: showPeoplePicker,
-                        label: context.t.people,
-                        currentFilter: peopleCurrentFilterWidget.value,
-                      ),
-                      SearchFilterChip(
-                        icon: Icons.location_on_outlined,
-                        onTap: showLocationPicker,
-                        label: context.t.search_filter_location,
-                        currentFilter: locationCurrentFilterWidget.value,
-                      ),
-                      if (userPreferences?.tagsEnabled ?? false)
-                        SearchFilterChip(
-                          icon: Icons.sell_outlined,
-                          onTap: showTagPicker,
-                          label: context.t.tags,
-                          currentFilter: tagCurrentFilterWidget.value,
-                        ),
-                      SearchFilterChip(
-                        icon: Icons.camera_alt_outlined,
-                        onTap: showCameraPicker,
-                        label: context.t.camera,
-                        currentFilter: cameraCurrentFilterWidget.value,
-                      ),
-                      SearchFilterChip(
-                        icon: Icons.date_range_outlined,
-                        onTap: showQuickDatePicker,
-                        label: context.t.search_filter_date,
-                        currentFilter: dateRangeCurrentFilterWidget.value,
-                      ),
-                      SearchFilterChip(
-                        key: const Key('media_type_chip'),
-                        icon: Icons.video_collection_outlined,
-                        onTap: showMediaTypePicker,
-                        label: context.t.search_filter_media_type,
-                        currentFilter: mediaTypeCurrentFilterWidget.value,
-                      ),
-                      if (userPreferences?.ratingsEnabled ?? false)
-                        SearchFilterChip(
-                          icon: Icons.star_outline_rounded,
-                          onTap: showStarRatingPicker,
-                          label: context.t.search_filter_star_rating,
-                          currentFilter: ratingCurrentFilterWidget.value,
-                        ),
-                      SearchFilterChip(
-                        icon: Icons.display_settings_outlined,
-                        onTap: showDisplayOptionPicker,
-                        label: context.t.search_filter_display_options,
-                        currentFilter: displayOptionCurrentFilterWidget.value,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            if (filter.value.isEmpty)
-              const _SearchSuggestions()
-            else
-              _SearchResultGrid(onScrollEnd: () => loadMoreSearchResults()),
+            if (filter.value.isEmpty) ...[
+              const SliverTabTopBarSpacer(extent: headerExtent),
+              const _SearchSuggestions(),
+            ] else
+              _SearchResultGrid(onScrollEnd: () => loadMoreSearchResults(), headerExtent: headerExtent),
           ],
         ),
       ),
@@ -732,10 +753,16 @@ class SearchPage extends HookConsumerWidget {
   }
 }
 
+/// Height of the filter chips row in the top bar, including its padding
+const double _kFilterChipsExtent = 66;
+
 class _SearchResultGrid extends ConsumerWidget {
   final VoidCallback onScrollEnd;
 
-  const _SearchResultGrid({required this.onScrollEnd});
+  /// Height of the top bar overlaying the results, below the status bar
+  final double headerExtent;
+
+  const _SearchResultGrid({required this.onScrollEnd, required this.headerExtent});
 
   bool _onScrollUpdateNotification(ScrollNotification notification) {
     final metrics = notification.metrics;
@@ -789,7 +816,10 @@ class _SearchResultGrid extends ConsumerWidget {
     final hasMore = ref.watch(paginatedSearchProvider.select((s) => s.nextPage != null));
 
     if (!hasAssets && !isLoading) {
-      return const _SearchNoResults();
+      return SliverPadding(
+        padding: EdgeInsets.only(top: context.padding.top + headerExtent),
+        sliver: const _SearchNoResults(),
+      );
     }
 
     return NotificationListener<ScrollUpdateNotification>(
@@ -812,7 +842,8 @@ class _SearchResultGrid extends ConsumerWidget {
           ],
           child: Timeline(
             groupBy: GroupAssetsBy.none,
-            appBar: null,
+            appBar: SliverTabTopBarSpacer(extent: headerExtent),
+            topBarBackground: TabTopBarBackground(extent: headerExtent),
             bottomSheet: const GeneralBottomSheet(minChildSize: 0.20),
             snapToMonth: false,
             loadingWidget: const SizedBox.shrink(),

@@ -55,6 +55,7 @@ class TabTopBar extends StatefulWidget {
     required this.tabIndex,
     required this.bar,
     this.withBackground = true,
+    this.extent = kTabTopBarHeight,
     required this.child,
   });
 
@@ -64,6 +65,9 @@ class TabTopBar extends StatefulWidget {
   final Widget bar;
 
   final bool withBackground;
+
+  /// Height of the bar below the status bar
+  final double extent;
 
   final Widget child;
 
@@ -82,7 +86,7 @@ class _TabTopBarState extends State<TabTopBar> {
 
   Widget _buildBar(BuildContext context) {
     final scope = TabTopBarScope.maybeOf(context);
-    final bar = SizedBox(height: context.padding.top + kTabTopBarHeight, child: widget.bar);
+    final bar = SizedBox(height: context.padding.top + widget.extent, child: widget.bar);
 
     return Positioned(
       top: 0,
@@ -118,7 +122,7 @@ class _TabTopBarState extends State<TabTopBar> {
           ? Stack(
               children: [
                 widget.child,
-                const Positioned(top: 0, left: 0, right: 0, child: TabTopBarBackground()),
+                Positioned(top: 0, left: 0, right: 0, child: TabTopBarBackground(extent: widget.extent)),
               ],
             )
           : widget.child,
@@ -128,13 +132,16 @@ class _TabTopBarState extends State<TabTopBar> {
 
 /// Progressive blur behind the top bar, strongest at the top and fading out below the bar
 class TabTopBarBackground extends StatefulWidget {
-  const TabTopBarBackground({super.key, this.intensity = 1.0, this.fillParent = false});
+  const TabTopBarBackground({super.key, this.intensity = 1.0, this.fillParent = false, this.extent = kTabTopBarHeight});
 
   /// Scales the blur and its tint, to fade the background in
   final double intensity;
 
   /// Fade the blur out over the height of the parent, such as an app bar, instead of below the top bar
   final bool fillParent;
+
+  /// Height of the bar below the status bar, the blur fades out below it
+  final double extent;
 
   @override
   State<TabTopBarBackground> createState() => _TabTopBarBackgroundState();
@@ -183,7 +190,7 @@ class _TabTopBarBackgroundState extends State<TabTopBarBackground> {
     if (widget.fillParent) {
       return LayoutBuilder(builder: (context, constraints) => _buildBackground(context, constraints.maxHeight));
     }
-    return _buildBackground(context, context.padding.top + kTabTopBarHeight + _kTabTopBarFadeExtent);
+    return _buildBackground(context, context.padding.top + widget.extent + _kTabTopBarFadeExtent);
   }
 
   Widget _buildBackground(BuildContext context, double height) {
@@ -291,11 +298,14 @@ class _RenderSliverScrollUnder extends RenderProxySliver {
 
 /// Space at the top of a tab page's scroll view, for its [TabTopBar] overlaying the content
 class SliverTabTopBarSpacer extends StatelessWidget {
-  const SliverTabTopBarSpacer({super.key});
+  const SliverTabTopBarSpacer({super.key, this.extent = kTabTopBarHeight});
+
+  /// Height of the bar below the status bar
+  final double extent;
 
   @override
   Widget build(BuildContext context) {
-    return SliverToBoxAdapter(child: SizedBox(height: context.padding.top + kTabTopBarHeight));
+    return SliverToBoxAdapter(child: SizedBox(height: context.padding.top + extent));
   }
 }
 
