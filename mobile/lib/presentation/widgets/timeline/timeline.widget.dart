@@ -150,7 +150,6 @@ class _SliverTimelineState extends ConsumerState<_SliverTimeline> with WidgetsBi
   // Added to the restored asset row's offset, keeps a zoomed asset under the fingers instead of at the top
   double _restoreScrollAdjustment = 0;
   Completer<void>? _restoreCompleter;
-  bool _isZooming = false;
   final _zoomController = TimelineZoomController();
 
   final Debouncer _fastScrollDebouncer = Debouncer(interval: const Duration(milliseconds: 100));
@@ -414,7 +413,6 @@ class _SliverTimelineState extends ConsumerState<_SliverTimeline> with WidgetsBi
             body: TimelinePinchZoom(
               controller: _zoomController,
               onColumnCountWillChange: _onColumnCountWillChange,
-              onZoomingChanged: (isZooming) => setState(() => _isZooming = isZooming),
               child: asyncSegments.widgetWhen(
                 onLoading: widget.loadingWidget != null ? () => widget.loadingWidget! : null,
                 onData: (segments) {
@@ -434,7 +432,7 @@ class _SliverTimelineState extends ConsumerState<_SliverTimeline> with WidgetsBi
                       final grid = CustomScrollView(
                         primary: true,
                         // Scrolling would move the content out from under the fingers while zooming
-                        physics: _isZooming ? const NeverScrollableScrollPhysics() : physics,
+                        physics: _ZoomLockScrollPhysics(controller: _zoomController, parent: physics),
                         scrollCacheExtent: .pixels(maxHeight * 2),
                         slivers: [
                           if (isSelectionMode)
@@ -486,18 +484,29 @@ class _SliverTimelineState extends ConsumerState<_SliverTimeline> with WidgetsBi
                         children: [
                           Positioned.fill(
                             child: ValueListenableBuilder(
-                              valueListenable: _zoomController.preview,
-                              builder: (_, preview, _) => preview == null
-                                  ? const SizedBox.shrink()
-                                  : TimelineZoomPreviewScope(
-                                      child: _ZoomPreviewGrid(
+                              valueListenable: _zoomController.previews,
+                              builder: (_, previews, _) => TimelineZoomPreviewScope(
+                                child: Stack(
+                                  fit: StackFit.expand,
+                                  children: [
+                                    for (final preview in previews)
+                                      _ZoomPreviewGrid(
                                         key: ValueKey(preview),
                                         segments: _buildPreviewSegments(segments, preview.columnCount),
                                         preview: preview,
                                         controller: _zoomController,
                                         maxHeight: maxHeight,
+                                        // Zooming in shrinks the preview, revealing rows outside of the viewport
+                                        cacheExtent:
+                                            maxHeight *
+                                            math.max(
+                                              0,
+                                              ref.read(timelineArgsProvider).columnCount / preview.columnCount - 1,
+                                            ),
                                       ),
-                                    ),
+                                  ],
+                                ),
+                              ),
                             ),
                           ),
                           NotificationListener<ScrollNotification>(
@@ -546,12 +555,14 @@ class _ZoomPreviewGrid extends StatefulWidget {
     required this.preview,
     required this.controller,
     required this.maxHeight,
+    required this.cacheExtent,
   });
 
   final List<Segment> segments;
   final TimelineZoomPreview preview;
   final TimelineZoomController controller;
   final double maxHeight;
+  final double cacheExtent;
 
   @override
   State<_ZoomPreviewGrid> createState() => _ZoomPreviewGridState();
@@ -586,7 +597,7 @@ class _ZoomPreviewGridState extends State<_ZoomPreviewGrid> {
         controller: _scrollController,
         primary: false,
         physics: const NeverScrollableScrollPhysics(),
-        scrollCacheExtent: .pixels(widget.maxHeight),
+        scrollCacheExtent: .pixels(widget.cacheExtent),
         slivers: [
           SliverToBoxAdapter(child: SizedBox(height: _topPadding)),
           SliverSegmentedList(
@@ -603,8 +614,8 @@ class _ZoomPreviewGridState extends State<_ZoomPreviewGrid> {
               addAutomaticKeepAlives: false,
               addRepaintBoundaries: false,
             ),
-            zoomTransform: widget.controller.previewTransform,
-            zoomOpacity: widget.controller.previewOpacity,
+            zoomTransform: widget.controller.previewTransform(widget.preview.columnCount),
+            zoomOpacity: widget.controller.previewOpacity(widget.preview.columnCount),
           ),
           // Leaves room to scroll the anchor into place near the end of the timeline
           SliverToBoxAdapter(child: SizedBox(height: widget.maxHeight)),
@@ -612,4 +623,23 @@ class _ZoomPreviewGridState extends State<_ZoomPreviewGrid> {
       ),
     );
   }
+}
+
+/// Ignores scrolling while zooming, without rebuilding the scroll view to swap its physics
+class _ZoomLockScrollPhysics extends ScrollPhysics {
+  const _ZoomLockScrollPhysics({required this.controller, super.parent});
+
+  final TimelineZoomController controller;
+
+  @override
+  _ZoomLockScrollPhysics applyTo(ScrollPhysics? ancestor) =>
+      _ZoomLockScrollPhysics(controller: controller, parent: buildParent(ancestor));
+
+  @override
+  double applyPhysicsToUserOffset(ScrollMetrics position, double offset) =>
+      controller.isScrollLocked ? 0 : super.applyPhysicsToUserOffset(position, offset);
+
+  @override
+  Simulation? createBallisticSimulation(ScrollMetrics position, double velocity) =>
+      super.createBallisticSimulation(position, controller.isScrollLocked ? 0 : velocity);
 }
