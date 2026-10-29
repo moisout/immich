@@ -1,0 +1,12 @@
+// Fork-specific overrides, kept out of build.gradle so upstream merges stay conflict-free.
+// Lets this build be installed alongside the upstream Play Store app.
+// Override per machine/CI with -Pfork.applicationId=... / -Pfork.appName=... or in ~/.gradle/gradle.properties.
+def forkApplicationId = findProperty('fork.applicationId') ?: 'dev.moisout.immich'
+def forkAppName = findProperty('fork.appName') ?: 'Immich Fork'
+
+android {
+  defaultConfig {
+    applicationId forkApplicationId
+    resValue "string", "app_name", forkAppName
+  }
+}

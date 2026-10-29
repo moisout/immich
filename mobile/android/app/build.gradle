@@ -116,3 +116,5 @@ dependencies {
 //f configurations.all {
 //f     exclude group: 'com.google.android.gms'
 //f }
+
+apply from: "fork.gradle"
