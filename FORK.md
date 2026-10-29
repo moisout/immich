@@ -231,6 +231,62 @@ Upstream scrollables with explicit physics keep them: `ClampingScrollPhysics` cl
 inherit the bounce. Code that reads `pixels` against the scroll extent may need clamping like the scrubber.
 `main.dart` and `MainActivity.kt` use CRLF line endings.
 
+### 8. Predictive back
+
+Android's predictive back is enabled, and every back gesture animates along with the finger and can be cancelled.
+Upstream disabled it in #12221 because back closed the app; their back handling has since moved to `PopScope`, which
+predictive back relies on.
+
+| Back gesture on | Animation |
+| --- | --- |
+| Pages | Their pop transition (fade forwards: slide and fade), following the finger 1:1 |
+| Dialogs, bottom sheets, menus | Their exit animation, 40% of the way (`kPredictiveBackPreviewExtent`), the rest on release |
+| Photos tab (root) | System back-to-home |
+| Other tabs | The pager slides back to Photos |
+| Photo viewer | Drag to dismiss: the photo follows the finger, shrinks towards it and the background fades; release closes it like a swipe down (hero back to the thumbnail). Zoomed in, the route fades instead |
+| Photo viewer with details open | The details close first, following the finger |
+
+How it works:
+
+- `PredictiveBackRouteObserver` (a navigator observer that is also a binding observer) drives the top route's
+  animation through the route's own `handleStartBackGesture` / `handleUpdateBackGestureProgress`, and pops it itself on
+  release, because Flutter's `handleCommitBackGesture` restarts the exit animation from the start. It starts the gesture
+  at the fully open value before moving the animation, so transitions see a pop from the first frame.
+- Pages use `BackGestureFadeForwardsPageTransitionsBuilder`, Flutter's `FadeForwardsPageTransitionsBuilder` with its
+  animations reported as reversing while a back gesture runs (`_BackGestureAnimation`). Otherwise it would show its push
+  animation in reverse, which has a different curve and fade.
+- `PredictiveBackScope` lets a page handle the gesture itself (tab shell, photo viewer): it gets the progress, and the
+  route observer leaves its route alone while it's enabled. With `interceptsPop` it also blocks the pop (a `PopScope`)
+  and handles the back button.
+- The photo viewer's heroes (`thumbnail_tile.widget.dart` and the photo view in `asset_page.widget.dart`) have
+  `transitionOnUserGestures`, so they fly along with a gesture-driven route animation.
+- When a gesture is cancelled, Android animates the progress back to 0 before reporting the cancel, keeping the last
+  touch position. The photo viewer scales its touch offset with the progress for that reason.
+
+The photo viewer also got changes that apply without the gesture:
+
+- Drag to dismiss shrinks the photo more slowly (half size over the screen height, at most down to 40%) and around the
+  finger, fades the background over half the screen height, and brings it back gradually when cancelled.
+- The route's close fade uses `Curves.easeOutCubic`, the black background stays longer.
+- The details panel slides in from the bottom of the screen (`_detailsShift`) instead of appearing under the photo,
+  and stays rendered until it has scrolled out (`_keepDetails`). Upstream removed it as soon as it was released.
+
+| File | Edit |
+| --- | --- |
+| `mobile/lib/widgets/common/predictive_back.dart` | **fork**. Route observer, `PredictiveBackScope`, page transition builder |
+| `mobile/android/app/src/main/AndroidManifest.xml` | `android:enableOnBackInvokedCallback="true"` |
+| `mobile/lib/main.dart` | `PredictiveBackRouteObserver()` in `navigatorObservers` |
+| `mobile/lib/theme/theme_data.dart` | `pageTransitionsTheme`: the fork builder on Android, Cupertino on iOS |
+| `mobile/lib/pages/common/tab_shell.page.dart` | `PopScope` replaced by `PredictiveBackScope`, `_onBack*` methods driving the page controller |
+| `.../widgets/asset_viewer/asset_page.widget.dart` | `PredictiveBackScope` around the page, `_onBack*` methods, `_updateDismiss` / `_cancelDismiss` extracted from the drag handlers, details shift and keep |
+| `.../widgets/images/thumbnail_tile.widget.dart` | `transitionOnUserGestures: true` on the `Hero` |
+| `mobile/lib/routing/router.dart` | Asset viewer route fades with `Curves.easeOutCubic` |
+
+Re-applying: pages from upstream get the gesture automatically. A new in-page back state (something closed by back
+without leaving the page) needs a `PredictiveBackScope` to follow the finger; a plain `PopScope` still works, it just
+switches on release. If upstream enables auto_route's `enablePredictiveBackGesture`, turn it off again, auto_route
+would wrap pages in Flutter's predictive back transition and both would drive the route.
+
 ## Conflict hotspots
 
 | File | Changes | Risk | Strategy |
@@ -238,12 +294,14 @@ inherit the bounce. Code that reads `pixels` against the scroll extent may need 
 | `.../widgets/timeline/timeline.widget.dart` | 3, 4 | High | Take theirs, re-apply the 7 points of change 3 |
 | `.../widgets/timeline/timeline_pinch_zoom.dart` | 3 | High if upstream touches zoom | Keep ours, port upstream fixes by hand |
 | `.../pages/search/search.page.dart` | 4 | High | Take theirs, move app bar and chips into `TabTopBar` |
-| `mobile/lib/pages/common/tab_shell.page.dart` | 2, 4, 6 | Medium | Merge by hand, the edits are in separate places. New destinations or tab side effects from upstream must also reach `_FloatingNavigationItem` (it reads `icon`, `selectedIcon`, `label`, `enabled`) |
+| `mobile/lib/pages/common/tab_shell.page.dart` | 2, 4, 6, 8 | Medium | Merge by hand, the edits are in separate places. New destinations or tab side effects from upstream must also reach `_FloatingNavigationItem` (it reads `icon`, `selectedIcon`, `label`, `enabled`) |
 | `.../widgets/timeline/sliver_segmented_list.dart` | 3 | Medium | Keep the paint override, merge layout changes |
 | `mesmerizing` / `remote_album` / `person_sliver_app_bar.dart` | 5 | Medium | Take theirs, re-apply the three edits |
 | `immich_sliver_app_bar.dart` | 4 | Low | New actions go into `_buildActions` |
 | Other pages listed above | 4, 5, 6 | Low | Small edits, merge by hand |
-| `main.dart`, `MainActivity.kt`, `scrubber.widget.dart`, `asset_page.widget.dart` | 7 | Low | One or two lines each, re-add |
+| `.../widgets/asset_viewer/asset_page.widget.dart` | 7, 8 | High | Take theirs, re-apply change 8's viewer edits: the scope and `_onBack*` methods, `_updateDismiss` / `_cancelDismiss`, details shift and keep, hero flag. Keep upstream's drag handling and port it into the extracted methods |
+| `main.dart`, `MainActivity.kt`, `scrubber.widget.dart` | 7, 8 | Low | One or two lines each, re-add |
+| `theme_data.dart`, `router.dart`, `thumbnail_tile.widget.dart`, `AndroidManifest.xml` | 8 | Low | One small edit each, re-add |
 
 ## Test checklist
 
@@ -264,3 +322,10 @@ inherit the bounce. Code that reads `pixels` against the scroll extent may need 
 - Vertical lists bounce at both ends with one light tick each time, horizontal ones (tabs, photo viewer) stop dead.
 - Timeline scrubber thumb stays within its track while bouncing; album pull to refresh still works; the photo
   viewer's swipe up for details and swipe down to close behave as before.
+- Back gesture, slowly, cancelled and released, on: a page (album, settings), a dialog, a bottom sheet, the Search,
+  Albums and Library tabs (pager slides to Photos), the Photos tab (back-to-home).
+- Photo viewer: back drags the photo like a swipe down, release lands it on its thumbnail, cancel glides it back with
+  the background; zoomed in, the route fades. With details open (also scrolled down), back closes only the details.
+- Details panel slides in from the bottom and stays visible while sliding out, after swipe down and after back.
+- Multi-select: back clears the selection. Photo editor with changes and backup album selection still ask before
+  leaving. Locked folder locks again on back. The back button (3-button navigation) works everywhere.
