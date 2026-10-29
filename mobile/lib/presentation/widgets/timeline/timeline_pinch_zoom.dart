@@ -59,6 +59,9 @@ const int _kMaxColumnCount = 6;
 /// Scale change before a zoom direction is picked, avoids flipping between previews while hovering around 1
 const double _kPreviewThreshold = 0.02;
 
+/// Exponent applied to the pinch scale, below 1 the grid zooms slower than the fingers move
+const double _kPinchSensitivity = 0.6;
+
 /// How far the grid can be stretched past the smallest/largest column count
 const double _kOverscrollLimit = 0.12;
 
@@ -230,7 +233,7 @@ class _TimelinePinchZoomState extends ConsumerState<TimelinePinchZoom> with Sing
       _startZoom(details);
     }
 
-    _scale = _applyOverscroll(_baseScale * (details.scale / _gestureScaleOrigin));
+    _scale = _applyOverscroll(_baseScale * math.pow(details.scale / _gestureScaleOrigin, _kPinchSensitivity));
     if (!_isSwitching) {
       _translation = _focalY - _anchorY * _scale;
       _updatePreview();
