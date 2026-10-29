@@ -26,6 +26,52 @@ class TabShellPage extends ConsumerStatefulWidget {
 }
 
 class _TabShellPageState extends ConsumerState<TabShellPage> {
+  StreamSubscription? _multiSelectSubscription;
+  bool _isMultiSelectEnabled = false;
+  int _pointerCount = 0;
+  int? _swipeStartIndex;
+
+  @override
+  void initState() {
+    super.initState();
+    _multiSelectSubscription = EventStream.shared.listen<MultiSelectToggleEvent>(
+      (event) => setState(() => _isMultiSelectEnabled = event.isEnabled),
+    );
+  }
+
+  @override
+  void dispose() {
+    unawaited(_multiSelectSubscription?.cancel());
+    super.dispose();
+  }
+
+  // Swiping is disabled while multiple pointers are down so pinch-to-zoom on the timeline doesn't change tabs
+  void _onPointerCountChanged(int delta) {
+    final wasMultiTouch = _pointerCount > 1;
+    _pointerCount = (_pointerCount + delta).clamp(0, 10);
+    if (wasMultiTouch != _pointerCount > 1) {
+      setState(() {});
+    }
+  }
+
+  bool _onPageScrollNotification(ScrollNotification notification, TabsRouter tabsRouter) {
+    // Ignore scrolling inside the tab pages themselves
+    if (notification.depth != 0) {
+      return false;
+    }
+
+    if (notification is ScrollStartNotification && notification.dragDetails != null) {
+      _swipeStartIndex = tabsRouter.activeIndex;
+    } else if (notification is ScrollEndNotification && _swipeStartIndex != null) {
+      final previousIndex = _swipeStartIndex!;
+      _swipeStartIndex = null;
+      if (tabsRouter.activeIndex != previousIndex) {
+        _onTabSelected(previousIndex, tabsRouter.activeIndex, ref);
+      }
+    }
+    return false;
+  }
+
   @override
   Widget build(BuildContext context) {
     final isScreenLandscape = context.orientation == Orientation.landscape;
@@ -76,12 +122,22 @@ class _TabShellPageState extends ConsumerState<TabShellPage> {
       );
     }
 
-    return AutoTabsRouter(
+    final canSwipe = !isReadonlyModeEnabled && !_isMultiSelectEnabled && _pointerCount < 2;
+
+    return AutoTabsRouter.pageView(
       routes: const [MainTimelineRoute(), SearchRoute(), AlbumsRoute(), LibraryRoute()],
-      duration: const Duration(milliseconds: 600),
-      transitionBuilder: (context, child, animation) => FadeTransition(opacity: animation, child: child),
-      builder: (context, child) {
+      physics: canSwipe ? null : const NeverScrollableScrollPhysics(),
+      builder: (context, pageView, _) {
         final tabsRouter = AutoTabsRouter.of(context);
+        final child = Listener(
+          onPointerDown: (_) => _onPointerCountChanged(1),
+          onPointerUp: (_) => _onPointerCountChanged(-1),
+          onPointerCancel: (_) => _onPointerCountChanged(-1),
+          child: NotificationListener<ScrollNotification>(
+            onNotification: (notification) => _onPageScrollNotification(notification, tabsRouter),
+            child: pageView,
+          ),
+        );
         return PopScope(
           canPop: tabsRouter.activeIndex == 0,
           onPopInvokedWithResult: (didPop, _) => !didPop ? tabsRouter.setActiveIndex(0) : null,
@@ -105,8 +161,15 @@ class _TabShellPageState extends ConsumerState<TabShellPage> {
 }
 
 void _onNavigationSelected(TabsRouter router, int index, WidgetRef ref) {
+  _onTabSelected(router.activeIndex, index, ref);
+  ref.read(hapticFeedbackProvider.notifier).selectionClick();
+  router.setActiveIndex(index);
+}
+
+/// Shared by tapping a navigation destination and swiping between tabs
+void _onTabSelected(int previousIndex, int index, WidgetRef ref) {
   // On Photos page menu tapped
-  if (router.activeIndex == kPhotoTabIndex && index == kPhotoTabIndex) {
+  if (previousIndex == kPhotoTabIndex && index == kPhotoTabIndex) {
     EventStream.shared.emit(const ScrollToTopEvent());
   }
 
@@ -114,12 +177,12 @@ void _onNavigationSelected(TabsRouter router, int index, WidgetRef ref) {
     ref.invalidate(memoryLaneProvider);
   }
 
-  if (router.activeIndex != kSearchTabIndex && index == kSearchTabIndex) {
+  if (previousIndex != kSearchTabIndex && index == kSearchTabIndex) {
     ref.read(searchPreFilterProvider.notifier).clear();
   }
 
   // On Search page tapped
-  if (router.activeIndex == kSearchTabIndex && index == kSearchTabIndex) {
+  if (previousIndex == kSearchTabIndex && index == kSearchTabIndex) {
     ref.read(searchInputFocusProvider).requestFocus();
   }
 
@@ -128,8 +191,6 @@ void _onNavigationSelected(TabsRouter router, int index, WidgetRef ref) {
     unawaited(ref.read(remoteAlbumProvider.notifier).refresh());
   }
 
-  ref.read(hapticFeedbackProvider.notifier).selectionClick();
-  router.setActiveIndex(index);
   ref.read(tabProvider.notifier).state = TabEnum.values[index];
 }
 
