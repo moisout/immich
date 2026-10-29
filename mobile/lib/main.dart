@@ -43,6 +43,7 @@ import 'package:immich_mobile/utils/debug_print.dart';
 import 'package:immich_mobile/utils/fallback_localizations.dart';
 import 'package:immich_mobile/utils/licenses.dart';
 import 'package:immich_mobile/utils/migration.dart';
+import 'package:immich_mobile/widgets/common/overscroll_scroll_behavior.dart';
 import 'package:immich_mobile/wm_executor.dart';
 import 'package:immich_ui/immich_ui.dart';
 import 'package:intl/date_symbol_data_local.dart';
@@ -291,6 +292,7 @@ class ImmichAppState extends ConsumerState<ImmichApp> with WidgetsBindingObserve
         themeMode: ref.watch(appConfigProvider.select((config) => config.theme.mode)),
         darkTheme: getThemeData(colorScheme: immichTheme.dark, locale: context.locale),
         theme: getThemeData(colorScheme: immichTheme.light, locale: context.locale),
+        scrollBehavior: const OverscrollScrollBehavior(),
         builder: (context, child) => ImmichTranslationProvider(
           translations: ImmichTranslations(
             submit: context.t.submit,

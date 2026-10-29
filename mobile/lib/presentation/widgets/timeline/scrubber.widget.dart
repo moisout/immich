@@ -108,7 +108,9 @@ class ScrubberState extends ConsumerState<Scrubber> with TickerProviderStateMixi
       return 0.0;
     }
 
-    return _scrollController.offset * _scrubberHeight / _scrollController.position.maxScrollExtent;
+    final offset = _scrollController.offset * _scrubberHeight / _scrollController.position.maxScrollExtent;
+    // The timeline overshoots its edges
+    return offset.clamp(0.0, _scrubberHeight);
   }
 
   @override

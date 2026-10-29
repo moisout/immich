@@ -200,6 +200,31 @@ landscape rail.
 A new scrolling tab page from upstream needs a `SliverTabBottomSpacer` (or bottom inset padding), or its last items
 end up behind the bar.
 
+### 7. Overscroll bounce with an edge haptic
+
+Vertical scrollables overshoot their edges and spring back instead of Android's stretch, with a light haptic tick when
+they start to overshoot. Horizontal scrollables stop at their edges without any effect.
+
+`OverscrollScrollBehavior` (set as the app's `scrollBehavior`) picks the physics per scrollable from its axis:
+`BouncingScrollPhysics` vertically, `ClampingScrollPhysics` horizontally. It removes the overscroll indicator, and wraps
+vertical scrollables in a listener that plays the haptic when a scroll update crosses from in range to out of range.
+The haptic is ColorOS' private feedback constant 307 (the one its gallery plays, found with
+`adb shell dumpsys vibrator_manager`), played through a method channel; elsewhere it falls back to
+`HapticFeedback.selectionClick`.
+
+| File | Edit |
+| --- | --- |
+| `mobile/lib/widgets/common/overscroll_scroll_behavior.dart` | **fork**. `OverscrollScrollBehavior`, haptic listener |
+| `mobile/android/app/src/main/kotlin/app/alextran/immich/fork/ScrollLimitHapticsPlugin.kt` | **fork**. Method channel `immich/fork/scroll_limit_haptics`, plays the ColorOS haptic |
+| `mobile/android/app/src/main/kotlin/app/alextran/immich/MainActivity.kt` | Import and `flutterEngine.plugins.add(ScrollLimitHapticsPlugin())` in `registerPlugins` |
+| `mobile/lib/main.dart` | Import and `scrollBehavior: const OverscrollScrollBehavior()` on `MaterialApp.router` |
+| `.../widgets/timeline/scrubber.widget.dart` | `_currentOffset` clamped to the scrubber height, so the thumb doesn't follow the overshoot |
+| `.../widgets/asset_viewer/asset_page.widget.dart` | `SnapScrollPhysics(parent: ClampingScrollPhysics())`, the details sheet keeps clamping |
+
+Upstream scrollables with explicit physics keep them: `ClampingScrollPhysics` clamps, and physics with a parent
+inherit the bounce. Code that reads `pixels` against the scroll extent may need clamping like the scrubber.
+`main.dart` and `MainActivity.kt` use CRLF line endings.
+
 ## Conflict hotspots
 
 | File | Changes | Risk | Strategy |
@@ -212,6 +237,7 @@ end up behind the bar.
 | `mesmerizing` / `remote_album` / `person_sliver_app_bar.dart` | 5 | Medium | Take theirs, re-apply the three edits |
 | `immich_sliver_app_bar.dart` | 4 | Low | New actions go into `_buildActions` |
 | Other pages listed above | 4, 5, 6 | Low | Small edits, merge by hand |
+| `main.dart`, `MainActivity.kt`, `scrubber.widget.dart`, `asset_page.widget.dart` | 7 | Low | One or two lines each, re-add |
 
 ## Test checklist
 
@@ -229,3 +255,6 @@ end up behind the bar.
 - Floating navigation bar: content visible underneath, last items of albums/library/search reachable.
 - Dialogs (profile) and pushed pages cover the top bar.
 - Rotate to landscape: navigation rail, top bar starts right of it.
+- Vertical lists bounce at both ends with one light tick each time, horizontal ones (tabs, photo viewer) stop dead.
+- Timeline scrubber thumb stays within its track while bouncing; album pull to refresh still works; the photo
+  viewer's swipe up for details and swipe down to close behave as before.
