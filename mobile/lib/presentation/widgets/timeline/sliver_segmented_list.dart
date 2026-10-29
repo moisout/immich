@@ -12,19 +12,30 @@ class SliverSegmentedList extends SliverMultiBoxAdaptorWidget {
   /// Transform applied when painting the assets, in viewport coordinates. Used by pinch to zoom
   final ValueListenable<Matrix4>? zoomTransform;
 
-  const SliverSegmentedList({super.key, required this._segments, required super.delegate, this.zoomTransform});
+  /// Opacity applied when painting the assets. Used by pinch to zoom to cross-fade between column counts
+  final ValueListenable<double>? zoomOpacity;
+
+  const SliverSegmentedList({
+    super.key,
+    required this._segments,
+    required super.delegate,
+    this.zoomTransform,
+    this.zoomOpacity,
+  });
 
   @override
   RenderSliverTimelineBoxAdaptor createRenderObject(BuildContext context) => RenderSliverTimelineBoxAdaptor(
     childManager: context as SliverMultiBoxAdaptorElement,
     segments: _segments,
     zoomTransform: zoomTransform,
+    zoomOpacity: zoomOpacity,
   );
 
   @override
   void updateRenderObject(BuildContext context, RenderSliverTimelineBoxAdaptor renderObject) {
     renderObject.segments = _segments;
     renderObject.zoomTransform = zoomTransform;
+    renderObject.zoomOpacity = zoomOpacity;
   }
 }
 
@@ -54,30 +65,71 @@ class RenderSliverTimelineBoxAdaptor extends RenderSliverMultiBoxAdaptor {
     markNeedsPaint();
   }
 
-  final _zoomLayer = LayerHandle<TransformLayer>();
+  ValueListenable<double>? _zoomOpacity;
 
-  RenderSliverTimelineBoxAdaptor({required super.childManager, required this._segments, this._zoomTransform});
+  set zoomOpacity(ValueListenable<double>? value) {
+    if (_zoomOpacity == value) {
+      return;
+    }
+    if (attached) {
+      _zoomOpacity?.removeListener(markNeedsPaint);
+      value?.addListener(markNeedsPaint);
+    }
+    _zoomOpacity = value;
+    markNeedsPaint();
+  }
+
+  final _zoomLayer = LayerHandle<TransformLayer>();
+  final _opacityLayer = LayerHandle<OpacityLayer>();
+
+  RenderSliverTimelineBoxAdaptor({
+    required super.childManager,
+    required this._segments,
+    this._zoomTransform,
+    this._zoomOpacity,
+  });
 
   @override
   void attach(PipelineOwner owner) {
     super.attach(owner);
     _zoomTransform?.addListener(markNeedsPaint);
+    _zoomOpacity?.addListener(markNeedsPaint);
   }
 
   @override
   void detach() {
     _zoomTransform?.removeListener(markNeedsPaint);
+    _zoomOpacity?.removeListener(markNeedsPaint);
     super.detach();
   }
 
   @override
   void dispose() {
     _zoomLayer.layer = null;
+    _opacityLayer.layer = null;
     super.dispose();
   }
 
   @override
   void paint(PaintingContext context, Offset offset) {
+    final opacity = _zoomOpacity?.value ?? 1.0;
+    if (opacity >= 1.0) {
+      _opacityLayer.layer = null;
+      _paintZoomed(context, offset);
+    } else if (opacity <= 0.0) {
+      _opacityLayer.layer = null;
+      _zoomLayer.layer = null;
+    } else {
+      _opacityLayer.layer = context.pushOpacity(
+        offset,
+        (opacity * 255).round(),
+        _paintZoomed,
+        oldLayer: _opacityLayer.layer,
+      );
+    }
+  }
+
+  void _paintZoomed(PaintingContext context, Offset offset) {
     final transform = _zoomTransform?.value;
     final isVerticalForward =
         applyGrowthDirectionToAxisDirection(constraints.axisDirection, constraints.growthDirection) ==

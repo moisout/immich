@@ -4,46 +4,75 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/presentation/widgets/timeline/constants.dart';
 import 'package:immich_mobile/presentation/widgets/timeline/timeline_drag_region.dart';
 import 'package:immich_mobile/providers/infrastructure/settings.provider.dart';
 
-/// Asset kept under the fingers while the column count changes, with its tile's top edge before and after the change
+/// Asset kept in place while the column count changes, with its tile's top edge before and after the change
 typedef TimelineZoomAnchor = ({int assetIndex, double currentTop, double targetTop});
+
+/// Layout with a neighbouring column count that is cross-faded in while zooming.
+/// It is scrolled so the tile of [assetIndex] has its top edge at [anchorTop], aligned with the grid
+typedef TimelineZoomPreview = ({int columnCount, int assetIndex, double anchorTop});
+
+/// State shared between the pinch to zoom gesture and the timeline rendering the grid and the preview
+class TimelineZoomController {
+  final gridTransform = ValueNotifier(Matrix4.identity());
+  final gridOpacity = ValueNotifier(1.0);
+  final previewTransform = ValueNotifier(Matrix4.identity());
+  final previewOpacity = ValueNotifier(0.0);
+  final preview = ValueNotifier<TimelineZoomPreview?>(null);
+
+  void dispose() {
+    gridTransform.dispose();
+    gridOpacity.dispose();
+    previewTransform.dispose();
+    previewOpacity.dispose();
+    preview.dispose();
+  }
+}
+
+/// Wraps the rendered [TimelineZoomPreview], so its tiles are not mistaken for the grid's
+class TimelineZoomPreviewScope extends StatelessWidget {
+  const TimelineZoomPreviewScope({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => child;
+}
 
 const int _kMinColumnCount = 2;
 const int _kMaxColumnCount = 6;
 
-/// Extra scale required past the midpoint between two column counts before switching, prevents flip-flopping
-const double _kSwitchHysteresis = 1.05;
+/// Scale change before the preview for a zoom direction is built, avoids rebuilding it while hovering around 1
+const double _kPreviewThreshold = 0.02;
 
 /// How far the grid can be stretched past the smallest/largest column count
 const double _kOverscrollLimit = 0.12;
 
 const Duration _kSettleDuration = Duration(milliseconds: 250);
-const Duration _kCrossFadeDuration = Duration(milliseconds: 180);
 const Duration _kRelayoutTimeout = Duration(milliseconds: 800);
 
-/// Pinch to zoom on the timeline grid. The grid follows the fingers continuously and switches the number of columns
-/// (the `timelineTilesPerRow` setting) mid-gesture, cross-fading from a snapshot while the asset under the fingers
-/// stays at the same height. On release the grid settles into the new layout. The left edge stays aligned throughout.
+/// Pinch to zoom on the timeline grid. The grid follows the fingers continuously, while the layout with the next
+/// column count is cross-faded in with the zoom progress. Once fully zoomed to it, the `timelineTilesPerRow` setting
+/// is switched over underneath the preview. On release the zoom settles to the nearest column count.
+/// The left edge stays aligned and the asset under the fingers stays at the same height.
 class TimelinePinchZoom extends ConsumerStatefulWidget {
   const TimelinePinchZoom({
     super.key,
-    required this.transform,
+    required this.controller,
     required this.onColumnCountWillChange,
     required this.onZoomingChanged,
     required this.child,
   });
 
-  /// Receives the zoom transform of the asset grid, in the coordinates of [child]
-  final ValueNotifier<Matrix4> transform;
+  final TimelineZoomController controller;
 
   /// Called immediately before the new column count is written to the setting. The returned future completes once
   /// the timeline has been laid out with the new column count and scrolled to the anchor
-  final Future<void> Function(TimelineZoomAnchor? anchor) onColumnCountWillChange;
+  final Future<void> Function(TimelineZoomAnchor anchor) onColumnCountWillChange;
 
   /// Called when a two finger zoom gesture starts or ends
   final ValueChanged<bool> onZoomingChanged;
@@ -59,15 +88,11 @@ class TimelinePinchZoom extends ConsumerStatefulWidget {
   ConsumerState createState() => _TimelinePinchZoomState();
 }
 
-class _TimelinePinchZoomState extends ConsumerState<TimelinePinchZoom> with TickerProviderStateMixin {
-  final _boundaryKey = GlobalKey();
+class _TimelinePinchZoomState extends ConsumerState<TimelinePinchZoom> with SingleTickerProviderStateMixin {
   final _contentKey = GlobalKey();
 
   late final AnimationController _settleController = AnimationController(vsync: this, duration: _kSettleDuration)
     ..addListener(_onSettleTick);
-  late final AnimationController _fadeController = AnimationController(vsync: this, duration: _kCrossFadeDuration)
-    ..addListener(() => setState(() {}))
-    ..addStatusListener(_onFadeStatus);
 
   int _pointerCount = 0;
   bool _isMultiTouch = false;
@@ -84,20 +109,24 @@ class _TimelinePinchZoomState extends ConsumerState<TimelinePinchZoom> with Tick
   double _baseScale = 1.0;
   double _gestureScaleOrigin = 1.0;
 
-  // Column switch state
+  // Preview state, the preview's tile extent relative to the grid's is [_previewRatio]
+  TimelineZoomPreview? _preview;
+  double _previewRatio = 1.0;
+
+  // Column switch state, while switching the preview stands in for the grid
   bool _isSwitching = false;
   bool _settleAfterSwitch = false;
-  ui.Image? _snapshot;
+  double _previewAnchorY = 0;
 
   // Settle animation state
   double _settleFromTranslation = 0;
   double _settleFromScale = 1.0;
+  double _settleToTranslation = 0;
+  double _settleToScale = 1.0;
 
   @override
   void dispose() {
     _settleController.dispose();
-    _fadeController.dispose();
-    _snapshot?.dispose();
     super.dispose();
   }
 
@@ -115,13 +144,46 @@ class _TimelinePinchZoomState extends ConsumerState<TimelinePinchZoom> with Tick
     }
   }
 
-  double _tileExtent(int columnCount) {
-    final width = (_contentKey.currentContext?.findRenderObject() as RenderBox?)?.size.width ?? 0;
-    return math.max(1.0, width - kTimelineSpacing * (columnCount - 1)) / columnCount;
+  double get _width => (_contentKey.currentContext?.findRenderObject() as RenderBox?)?.size.width ?? 0;
+
+  double _tileExtent(int columnCount) => math.max(1.0, _width - kTimelineSpacing * (columnCount - 1)) / columnCount;
+
+  /// How far the zoom has progressed from the grid's column count to the preview's, between 0 and 1
+  double get _previewProgress {
+    if (_preview == null) {
+      return 0;
+    }
+    return (math.log(_scale) / math.log(_previewRatio)).clamp(0.0, 1.0);
   }
 
-  void _applyTransform() {
-    widget.transform.value = Matrix4.diagonal3Values(_scale, _scale, 1)..setTranslationRaw(0, _translation, 0);
+  double get _previewScale => _scale / _previewRatio;
+
+  /// Aligns the preview's anchor tile with the grid's
+  double get _previewTranslation => _translation + (_scale - _previewScale) * (_preview?.anchorTop ?? 0);
+
+  static Matrix4 _matrix(double scale, double translation) =>
+      Matrix4.diagonal3Values(scale, scale, 1)..setTranslationRaw(0, translation, 0);
+
+  void _apply() {
+    final controller = widget.controller;
+    if (_isSwitching) {
+      controller.previewTransform.value = _matrix(_scale, _focalY - _previewAnchorY * _scale);
+      controller.previewOpacity.value = 1;
+      controller.gridOpacity.value = 0;
+      return;
+    }
+
+    controller.gridTransform.value = _matrix(_scale, _translation);
+    if (_preview == null) {
+      controller.gridOpacity.value = 1;
+      controller.previewOpacity.value = 0;
+      return;
+    }
+
+    final progress = _previewProgress;
+    controller.previewTransform.value = _matrix(_previewScale, _previewTranslation);
+    controller.gridOpacity.value = (2 * (1 - progress)).clamp(0.0, 1.0);
+    controller.previewOpacity.value = (2 * progress).clamp(0.0, 1.0);
   }
 
   void _onScaleUpdate(ScaleUpdateDetails details) {
@@ -134,28 +196,27 @@ class _TimelinePinchZoomState extends ConsumerState<TimelinePinchZoom> with Tick
       _startZoom(details);
     }
 
-    final rawScale = _baseScale * (details.scale / _gestureScaleOrigin);
-    _scale = _applyOverscroll(rawScale);
-
-    if (!_isSwitching && _snapshot == null) {
-      final n = _columnCount;
-      if (n > _kMinColumnCount && rawScale > math.sqrt(n / (n - 1)) * _kSwitchHysteresis) {
-        _switchColumnCount(n - 1);
-      } else if (n < _kMaxColumnCount && rawScale < math.sqrt(n / (n + 1)) / _kSwitchHysteresis) {
-        _switchColumnCount(n + 1);
+    _scale = _applyOverscroll(_baseScale * (details.scale / _gestureScaleOrigin));
+    if (!_isSwitching) {
+      _translation = _focalY - _anchorY * _scale;
+      _updatePreview();
+      if (_preview != null && _previewProgress >= 1) {
+        _switchColumnCount();
       }
     }
-
-    _translation = _focalY - _anchorY * _scale;
-    _applyTransform();
+    _apply();
   }
 
   void _startZoom(ScaleUpdateDetails details) {
     _settleController.stop();
     _isZooming = true;
-    _columnCount = ref.read(appConfigProvider.select((config) => config.timeline.tilesPerRow));
+    if (!_isSwitching) {
+      _columnCount = ref.read(appConfigProvider.select((config) => config.timeline.tilesPerRow));
+    }
+    final previousFocalY = _focalY;
     _focalY = details.localFocalPoint.dy;
     _anchorY = (_focalY - _translation) / _scale;
+    _previewAnchorY += (_focalY - previousFocalY) / _scale;
     _baseScale = _scale;
     _gestureScaleOrigin = details.scale;
     widget.onZoomingChanged(true);
@@ -188,38 +249,52 @@ class _TimelinePinchZoomState extends ConsumerState<TimelinePinchZoom> with Tick
     return scale;
   }
 
-  void _switchColumnCount(int columnCount) {
-    final previousExtent = _tileExtent(_columnCount);
-    final nextExtent = _tileExtent(columnCount);
-
-    // Snapshot the current frame to cross-fade from while the timeline is laid out again
-    try {
-      final boundary = _boundaryKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
-      _snapshot = boundary?.toImageSync(pixelRatio: MediaQuery.devicePixelRatioOf(context));
-    } catch (_) {
-      _snapshot = null;
+  /// Shows the layout with the neighbouring column count in the direction of the zoom
+  void _updatePreview() {
+    if (math.log(_scale).abs() < _kPreviewThreshold) {
+      return;
     }
 
-    // The grid is only scaled horizontally, so any tile in the row under the fingers works as the anchor
-    final width = (_contentKey.currentContext?.findRenderObject() as RenderBox?)?.size.width ?? 0;
-    final tile = _findTileNearest(Offset(width / 2, _anchorY));
-    final anchorFraction = tile == null ? null : (_anchorY - tile.rect.top) / tile.rect.height;
-
-    // Rebase the scale so the tiles keep their on-screen size in the new layout
-    _baseScale *= previousExtent / nextExtent;
-    _scale *= previousExtent / nextExtent;
-    _columnCount = columnCount;
-    setState(() => _isSwitching = true);
-
-    final anchor = tile == null
-        ? null
-        : (assetIndex: tile.assetIndex, currentTop: tile.rect.top, targetTop: _anchorY - anchorFraction! * nextExtent);
-    final relayout = widget.onColumnCountWillChange(anchor);
-    unawaited(ref.read(settingsProvider).write(.timelineTilesPerRow, columnCount));
-    unawaited(_completeSwitch(relayout, tile?.assetIndex, anchorFraction));
+    final columnCount = _scale > 1 ? _columnCount - 1 : _columnCount + 1;
+    if (columnCount < _kMinColumnCount || columnCount > _kMaxColumnCount) {
+      _setPreview(null);
+    } else if (_preview?.columnCount != columnCount) {
+      _setPreview(columnCount);
+    }
   }
 
-  Future<void> _completeSwitch(Future<void> relayout, int? assetIndex, double? anchorFraction) async {
+  void _setPreview(int? columnCount) {
+    final tile = columnCount == null ? null : _findTileNearest(Offset(_width / 2, _anchorY));
+    if (columnCount == null || tile == null) {
+      _preview = null;
+      widget.controller.preview.value = null;
+      return;
+    }
+
+    _previewRatio = _tileExtent(columnCount) / _tileExtent(_columnCount);
+    _preview = (columnCount: columnCount, assetIndex: tile.assetIndex, anchorTop: tile.rect.top);
+    widget.controller.preview.value = _preview;
+  }
+
+  /// Switches the grid to the preview's column count, the preview is shown in its place until it is laid out
+  void _switchColumnCount() {
+    final preview = _preview!;
+    _isSwitching = true;
+    _previewAnchorY = (_focalY - _previewTranslation) / _previewScale;
+    _baseScale /= _previewRatio;
+    _scale = _previewScale;
+    _columnCount = preview.columnCount;
+
+    final relayout = widget.onColumnCountWillChange((
+      assetIndex: preview.assetIndex,
+      currentTop: preview.anchorTop,
+      targetTop: preview.anchorTop,
+    ));
+    unawaited(ref.read(settingsProvider).write(.timelineTilesPerRow, preview.columnCount));
+    unawaited(_completeSwitch(relayout, preview));
+  }
+
+  Future<void> _completeSwitch(Future<void> relayout, TimelineZoomPreview preview) async {
     await relayout.timeout(_kRelayoutTimeout, onTimeout: () {});
     // Wait for the frame that lays out the restored scroll position
     await WidgetsBinding.instance.endOfFrame;
@@ -227,15 +302,14 @@ class _TimelinePinchZoomState extends ConsumerState<TimelinePinchZoom> with Tick
       return;
     }
 
-    final tile = assetIndex == null ? null : _findTile(assetIndex);
-    if (tile != null && anchorFraction != null) {
-      _anchorY = tile.top + anchorFraction * tile.height;
-    }
-
+    // Translate from the preview's coordinates to the grid's, they are aligned on the anchor tile
+    final tileTop = _findTile(preview.assetIndex)?.top ?? preview.anchorTop;
+    _anchorY = _previewAnchorY + tileTop - preview.anchorTop;
     _translation = _focalY - _anchorY * _scale;
-    _applyTransform();
-    setState(() => _isSwitching = false);
-    unawaited(_fadeController.forward(from: 0));
+    _isSwitching = false;
+    _preview = null;
+    widget.controller.preview.value = null;
+    _apply();
 
     if (_settleAfterSwitch) {
       _settleAfterSwitch = false;
@@ -243,29 +317,45 @@ class _TimelinePinchZoomState extends ConsumerState<TimelinePinchZoom> with Tick
     }
   }
 
-  void _onFadeStatus(AnimationStatus status) {
-    if (status == AnimationStatus.completed) {
-      setState(() {
-        _snapshot?.dispose();
-        _snapshot = null;
-      });
+  /// Animates to the nearest column count once the fingers are lifted
+  void _settle() {
+    if (_preview != null && _previewProgress >= 0.5) {
+      unawaited(
+        _animateTo(_previewRatio, _focalY - _anchorY * _previewRatio).then((_) {
+          if (_preview == null) {
+            return;
+          }
+          _switchColumnCount();
+          _settleAfterSwitch = true;
+        }),
+      );
+    } else {
+      unawaited(
+        _animateTo(1.0, 0).then((_) {
+          _setPreview(null);
+          _apply();
+        }),
+      );
     }
   }
 
-  void _settle() {
-    _settleFromTranslation = _translation;
+  /// Completes only when the animation finishes, not when it is interrupted by another gesture
+  TickerFuture _animateTo(double scale, double translation) {
     _settleFromScale = _scale;
-    unawaited(_settleController.forward(from: 0));
+    _settleFromTranslation = _translation;
+    _settleToScale = scale;
+    _settleToTranslation = translation;
+    return _settleController.forward(from: 0);
   }
 
   void _onSettleTick() {
     final t = Curves.easeOutCubic.transform(_settleController.value);
-    _translation = ui.lerpDouble(_settleFromTranslation, 0, t)!;
-    _scale = ui.lerpDouble(_settleFromScale, 1.0, t)!;
-    _applyTransform();
+    _scale = ui.lerpDouble(_settleFromScale, _settleToScale, t)!;
+    _translation = ui.lerpDouble(_settleFromTranslation, _settleToTranslation, t)!;
+    _apply();
   }
 
-  /// Visits the laid out timeline tiles, with their rects in the unzoomed coordinates of the child
+  /// Visits the laid out grid tiles, with their rects in the unzoomed coordinates of the child
   void _visitTiles(bool Function(int assetIndex, Rect rect) visitor) {
     final contentContext = _contentKey.currentContext;
     final content = contentContext?.findRenderObject();
@@ -275,10 +365,10 @@ class _TimelinePinchZoomState extends ConsumerState<TimelinePinchZoom> with Tick
 
     bool done = false;
     void visit(Element element) {
-      if (done) {
+      final widget = element.widget;
+      if (done || widget is TimelineZoomPreviewScope) {
         return;
       }
-      final widget = element.widget;
       if (widget is TimelineAssetIndexWrapper) {
         final box = element.renderObject;
         if (box is RenderBox && box.attached && box.hasSize) {
@@ -323,8 +413,6 @@ class _TimelinePinchZoomState extends ConsumerState<TimelinePinchZoom> with Tick
 
   @override
   Widget build(BuildContext context) {
-    final snapshot = _snapshot;
-
     return Listener(
       behavior: HitTestBehavior.translucent,
       onPointerDown: _onPointerDown,
@@ -340,26 +428,7 @@ class _TimelinePinchZoomState extends ConsumerState<TimelinePinchZoom> with Tick
             },
           ),
         },
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            RepaintBoundary(
-              key: _boundaryKey,
-              child: KeyedSubtree(key: _contentKey, child: widget.child),
-            ),
-            if (snapshot != null)
-              IgnorePointer(
-                child: Opacity(
-                  opacity: _isSwitching ? 1 : 1 - _fadeController.value,
-                  // Opaque, so the timeline being laid out again doesn't shine through the gaps
-                  child: ColoredBox(
-                    color: Theme.of(context).scaffoldBackgroundColor,
-                    child: RawImage(image: snapshot, fit: BoxFit.fill),
-                  ),
-                ),
-              ),
-          ],
-        ),
+        child: KeyedSubtree(key: _contentKey, child: widget.child),
       ),
     );
   }

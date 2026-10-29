@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:auto_route/auto_route.dart';
 import 'package:collection/collection.dart';
@@ -12,6 +13,7 @@ import 'package:immich_mobile/extensions/build_context_extensions.dart';
 import 'package:immich_mobile/presentation/widgets/action_buttons/download_status_floating_button.widget.dart';
 import 'package:immich_mobile/presentation/widgets/bottom_sheet/general_bottom_sheet.widget.dart';
 import 'package:immich_mobile/presentation/widgets/timeline/constants.dart';
+import 'package:immich_mobile/presentation/widgets/timeline/fixed/segment_builder.dart';
 import 'package:immich_mobile/presentation/widgets/timeline/multi_select_status_button.widget.dart';
 import 'package:immich_mobile/presentation/widgets/timeline/scrubber.widget.dart';
 import 'package:immich_mobile/presentation/widgets/timeline/segment.model.dart';
@@ -149,7 +151,7 @@ class _SliverTimelineState extends ConsumerState<_SliverTimeline> with WidgetsBi
   double _restoreScrollAdjustment = 0;
   Completer<void>? _restoreCompleter;
   bool _isZooming = false;
-  final _zoomTransform = ValueNotifier(Matrix4.identity());
+  final _zoomController = TimelineZoomController();
 
   final Debouncer _fastScrollDebouncer = Debouncer(interval: const Duration(milliseconds: 100));
 
@@ -161,6 +163,12 @@ class _SliverTimelineState extends ConsumerState<_SliverTimeline> with WidgetsBi
     _eventSubscription = EventStream.shared.listen(_onEvent);
 
     ref.listenManual(multiSelectProvider.select((s) => s.isEnabled), _onMultiSelectionToggled);
+    // The scroll view is kept while the segments are regenerated, restore the position once they are
+    ref.listenManual(timelineSegmentProvider, (_, segments) {
+      if (!segments.isLoading && segments.hasValue && _scrollController.hasClients) {
+        _restoreAssetPosition(null);
+      }
+    });
   }
 
   @override
@@ -232,17 +240,10 @@ class _SliverTimelineState extends ConsumerState<_SliverTimeline> with WidgetsBi
     _restoreCompleter = null;
   }
 
-  double? _getAssetRowOffset(List<Segment> segments, int assetIndex) {
-    final segment = segments.lastWhereOrNull((segment) => segment.firstAssetIndex <= assetIndex);
-    if (segment == null) {
-      return null;
-    }
-    final columnCount = ref.read(timelineArgsProvider).columnCount;
-    final rowIndexInSegment = ((assetIndex - segment.firstAssetIndex) / columnCount).floor();
-    return segment.indexToLayoutOffset(segment.firstIndex + 1 + rowIndexInSegment);
-  }
+  double? _getAssetRowOffset(List<Segment> segments, int assetIndex) =>
+      _assetRowOffset(segments, assetIndex, ref.read(timelineArgsProvider).columnCount);
 
-  Future<void> _onColumnCountWillChange(TimelineZoomAnchor? anchor) {
+  Future<void> _onColumnCountWillChange(TimelineZoomAnchor anchor) {
     final segments = ref.read(timelineSegmentProvider).valueOrNull;
     if (segments == null || !_scrollController.hasClients) {
       return Future.value();
@@ -250,8 +251,8 @@ class _SliverTimelineState extends ConsumerState<_SliverTimeline> with WidgetsBi
 
     _restoreCompleter?.complete();
     _restoreCompleter = Completer();
-    final currentRowOffset = anchor == null ? null : _getAssetRowOffset(segments, anchor.assetIndex);
-    if (anchor != null && currentRowOffset != null) {
+    final currentRowOffset = _getAssetRowOffset(segments, anchor.assetIndex);
+    if (currentRowOffset != null) {
       // Scroll offset at which the asset list starts, the slivers above it keep their extent across column counts
       final listStartOffset = anchor.currentTop + _scrollController.offset - currentRowOffset;
       _restoreAssetIndex = anchor.assetIndex;
@@ -261,6 +262,19 @@ class _SliverTimelineState extends ConsumerState<_SliverTimeline> with WidgetsBi
       _restoreScrollAdjustment = 0;
     }
     return _restoreCompleter!.future;
+  }
+
+  /// Segments of the timeline laid out with [columnCount] columns, used to preview it while zooming
+  List<Segment> _buildPreviewSegments(List<Segment> segments, int columnCount) {
+    final args = ref.read(timelineArgsProvider);
+    final tileExtent = math.max(0.0, args.maxWidth - args.spacing * (columnCount - 1)) / columnCount;
+    return FixedSegmentBuilder(
+      buckets: segments.map((segment) => segment.bucket).toList(),
+      tileHeight: tileExtent,
+      columnCount: columnCount,
+      spacing: args.spacing,
+      groupBy: args.groupBy ?? ref.read(appConfigProvider.select((config) => config.timeline.groupAssetsBy)),
+    ).generate();
   }
 
   void _onMultiSelectionToggled(_, bool isEnabled) {
@@ -290,7 +304,7 @@ class _SliverTimelineState extends ConsumerState<_SliverTimeline> with WidgetsBi
     WidgetsBinding.instance.removeObserver(this);
     _fastScrollDebouncer.dispose();
     _scrollController.dispose();
-    _zoomTransform.dispose();
+    _zoomController.dispose();
     unawaited(_eventSubscription?.cancel());
     super.dispose();
   }
@@ -359,7 +373,12 @@ class _SliverTimelineState extends ConsumerState<_SliverTimeline> with WidgetsBi
 
   @override
   Widget build(BuildContext _) {
-    final asyncSegments = ref.watch(timelineSegmentProvider);
+    final watchedSegments = ref.watch(timelineSegmentProvider);
+    // Keep the previous layout while the segments are regenerated (column count or width changes), instead of
+    // rebuilding the scroll view behind a loading indicator
+    final asyncSegments = watchedSegments.isReloading && watchedSegments.hasValue
+        ? AsyncData(watchedSegments.requireValue)
+        : watchedSegments;
     final maxHeight = ref.watch(timelineArgsProvider.select((args) => args.maxHeight));
     final isSelectionMode = ref.watch(multiSelectProvider.select((s) => s.forceEnable));
     final isMultiSelectEnabled = ref.watch(multiSelectProvider.select((s) => s.isEnabled));
@@ -393,7 +412,7 @@ class _SliverTimelineState extends ConsumerState<_SliverTimeline> with WidgetsBi
             resizeToAvoidBottomInset: false,
             floatingActionButton: const DownloadStatusFloatingButton(),
             body: TimelinePinchZoom(
-              transform: _zoomTransform,
+              controller: _zoomController,
               onColumnCountWillChange: _onColumnCountWillChange,
               onZoomingChanged: (isZooming) => setState(() => _isZooming = isZooming),
               child: asyncSegments.widgetWhen(
@@ -425,7 +444,8 @@ class _SliverTimelineState extends ConsumerState<_SliverTimeline> with WidgetsBi
                           if (widget.topSliverWidget != null) widget.topSliverWidget!,
                           SliverSegmentedList(
                             segments: segments,
-                            zoomTransform: _zoomTransform,
+                            zoomTransform: _zoomController.gridTransform,
+                            zoomOpacity: _zoomController.gridOpacity,
                             delegate: SliverChildBuilderDelegate(
                               (ctx, index) {
                                 if (index >= childCount) {
@@ -464,6 +484,22 @@ class _SliverTimelineState extends ConsumerState<_SliverTimeline> with WidgetsBi
                       return Stack(
                         clipBehavior: Clip.none,
                         children: [
+                          Positioned.fill(
+                            child: ValueListenableBuilder(
+                              valueListenable: _zoomController.preview,
+                              builder: (_, preview, _) => preview == null
+                                  ? const SizedBox.shrink()
+                                  : TimelineZoomPreviewScope(
+                                      child: _ZoomPreviewGrid(
+                                        key: ValueKey(preview),
+                                        segments: _buildPreviewSegments(segments, preview.columnCount),
+                                        preview: preview,
+                                        controller: _zoomController,
+                                        maxHeight: maxHeight,
+                                      ),
+                                    ),
+                            ),
+                          ),
                           NotificationListener<ScrollNotification>(
                             onNotification: _onScrollVelocityNotification,
                             child: timeline,
@@ -487,6 +523,92 @@ class _SliverTimelineState extends ConsumerState<_SliverTimeline> with WidgetsBi
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+double? _assetRowOffset(List<Segment> segments, int assetIndex, int columnCount) {
+  final segment = segments.lastWhereOrNull((segment) => segment.firstAssetIndex <= assetIndex);
+  if (segment == null) {
+    return null;
+  }
+  final rowIndexInSegment = ((assetIndex - segment.firstAssetIndex) / columnCount).floor();
+  return segment.indexToLayoutOffset(segment.firstIndex + 1 + rowIndexInSegment);
+}
+
+/// Non-interactive timeline grid with another column count, cross-faded in by [TimelinePinchZoom].
+/// It is scrolled so the preview's anchor tile lines up with the same asset in the grid
+class _ZoomPreviewGrid extends StatefulWidget {
+  const _ZoomPreviewGrid({
+    super.key,
+    required this.segments,
+    required this.preview,
+    required this.controller,
+    required this.maxHeight,
+  });
+
+  final List<Segment> segments;
+  final TimelineZoomPreview preview;
+  final TimelineZoomController controller;
+  final double maxHeight;
+
+  @override
+  State<_ZoomPreviewGrid> createState() => _ZoomPreviewGridState();
+}
+
+class _ZoomPreviewGridState extends State<_ZoomPreviewGrid> {
+  late final ScrollController _scrollController;
+  late final double _topPadding;
+
+  @override
+  void initState() {
+    super.initState();
+    final rowOffset = _assetRowOffset(widget.segments, widget.preview.assetIndex, widget.preview.columnCount) ?? 0;
+    final scrollOffset = rowOffset - widget.preview.anchorTop;
+    // The anchor can be closer to the top than the viewport allows scrolling to, pad the top instead
+    _topPadding = math.max(0, -scrollOffset);
+    _scrollController = ScrollController(initialScrollOffset: math.max(0, scrollOffset));
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final segments = widget.segments;
+    final childCount = (segments.lastOrNull?.lastIndex ?? -1) + 1;
+    return IgnorePointer(
+      child: CustomScrollView(
+        controller: _scrollController,
+        primary: false,
+        physics: const NeverScrollableScrollPhysics(),
+        scrollCacheExtent: .pixels(widget.maxHeight),
+        slivers: [
+          SliverToBoxAdapter(child: SizedBox(height: _topPadding)),
+          SliverSegmentedList(
+            segments: segments,
+            delegate: SliverChildBuilderDelegate(
+              (ctx, index) {
+                if (index >= childCount) {
+                  return null;
+                }
+                final segment = segments.findByIndex(index);
+                return segment?.builder(ctx, index) ?? const SizedBox.shrink();
+              },
+              childCount: childCount,
+              addAutomaticKeepAlives: false,
+              addRepaintBoundaries: false,
+            ),
+            zoomTransform: widget.controller.previewTransform,
+            zoomOpacity: widget.controller.previewOpacity,
+          ),
+          // Leaves room to scroll the anchor into place near the end of the timeline
+          SliverToBoxAdapter(child: SizedBox(height: widget.maxHeight)),
+        ],
       ),
     );
   }
