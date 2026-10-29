@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
 
@@ -126,7 +128,13 @@ class _TabTopBarState extends State<TabTopBar> {
 
 /// Progressive blur behind the top bar, strongest at the top and fading out below the bar
 class TabTopBarBackground extends StatefulWidget {
-  const TabTopBarBackground({super.key});
+  const TabTopBarBackground({super.key, this.intensity = 1.0, this.fillParent = false});
+
+  /// Scales the blur and its tint, to fade the background in
+  final double intensity;
+
+  /// Fade the blur out over the height of the parent, such as an app bar, instead of below the top bar
+  final bool fillParent;
 
   @override
   State<TabTopBarBackground> createState() => _TabTopBarBackgroundState();
@@ -155,14 +163,14 @@ class _TabTopBarBackgroundState extends State<TabTopBarBackground> {
   }
 
   /// A single filter blurring with a strength fading out from the top, in a horizontal and a vertical pass
-  ui.ImageFilter _progressiveBlur(ui.FragmentProgram program, double height) {
+  ui.ImageFilter _progressiveBlur(ui.FragmentProgram program, double height, double maxSigma) {
     final pixelRatio = MediaQuery.devicePixelRatioOf(context);
     ui.ImageFilter pass(double dx, double dy) {
       final shader = program.fragmentShader()
         // The first two floats are the input size, set by the engine
         ..setFloat(2, dx)
         ..setFloat(3, dy)
-        ..setFloat(4, _kMaxBlurSigma * pixelRatio)
+        ..setFloat(4, maxSigma * pixelRatio)
         ..setFloat(5, height * pixelRatio);
       return ui.ImageFilter.shader(shader);
     }
@@ -172,9 +180,21 @@ class _TabTopBarBackgroundState extends State<TabTopBarBackground> {
 
   @override
   Widget build(BuildContext context) {
-    final height = context.padding.top + kTabTopBarHeight + _kTabTopBarFadeExtent;
+    if (widget.fillParent) {
+      return LayoutBuilder(builder: (context, constraints) => _buildBackground(context, constraints.maxHeight));
+    }
+    return _buildBackground(context, context.padding.top + kTabTopBarHeight + _kTabTopBarFadeExtent);
+  }
+
+  Widget _buildBackground(BuildContext context, double height) {
+    final intensity = widget.intensity.clamp(0.0, 1.0);
+    if (intensity <= 0 || !height.isFinite) {
+      return const SizedBox.shrink();
+    }
+
     final surface = context.colorScheme.surface;
     final program = _program;
+    final maxSigma = _kMaxBlurSigma * intensity;
 
     return IgnorePointer(
       child: SizedBox(
@@ -186,8 +206,8 @@ class _TabTopBarBackgroundState extends State<TabTopBarBackground> {
               child: BackdropFilter(
                 // Without shader filters, fall back to a uniform blur
                 filter: program != null
-                    ? _progressiveBlur(program, height)
-                    : ui.ImageFilter.blur(sigmaX: _kMaxBlurSigma / 2, sigmaY: _kMaxBlurSigma / 2),
+                    ? _progressiveBlur(program, height, maxSigma)
+                    : ui.ImageFilter.blur(sigmaX: maxSigma / 2, sigmaY: maxSigma / 2),
                 child: const SizedBox.expand(),
               ),
             ),
@@ -198,8 +218,8 @@ class _TabTopBarBackgroundState extends State<TabTopBarBackground> {
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
                   colors: [
-                    surface.withValues(alpha: 0.7),
-                    surface.withValues(alpha: 0.45),
+                    surface.withValues(alpha: 0.7 * intensity),
+                    surface.withValues(alpha: 0.45 * intensity),
                     surface.withValues(alpha: 0),
                   ],
                   stops: const [0, 0.55, 1],
@@ -210,6 +230,62 @@ class _TabTopBarBackgroundState extends State<TabTopBarBackground> {
         ),
       ),
     );
+  }
+}
+
+/// Blurs the collapsed part of a [SliverAppBar]'s flexible space, fading in as it collapses.
+/// Wrap the app bar in [SliverScrollUnder] and make it transparent for the content to scroll underneath it
+class FlexibleSpaceTopBarBlur extends StatelessWidget {
+  const FlexibleSpaceTopBarBlur({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final settings = context.dependOnInheritedWidgetOfExactType<FlexibleSpaceBarSettings>();
+    if (settings == null) {
+      return child;
+    }
+
+    final deltaExtent = settings.maxExtent - settings.minExtent;
+    final collapseProgress = deltaExtent <= 0
+        ? 1.0
+        : (1.0 - (settings.currentExtent - settings.minExtent) / deltaExtent).clamp(0.0, 1.0);
+
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        Positioned(
+          top: 0,
+          left: 0,
+          right: 0,
+          height: settings.minExtent,
+          child: TabTopBarBackground(intensity: collapseProgress, fillParent: true),
+        ),
+        child,
+      ],
+    );
+  }
+}
+
+/// Lets the following slivers scroll underneath the pinned part of [sliver], such as a pinned [SliverAppBar],
+/// instead of stopping at its bottom edge
+class SliverScrollUnder extends SingleChildRenderObjectWidget {
+  const SliverScrollUnder({super.key, required Widget sliver}) : super(child: sliver);
+
+  @override
+  RenderObject createRenderObject(BuildContext context) => _RenderSliverScrollUnder();
+}
+
+class _RenderSliverScrollUnder extends RenderProxySliver {
+  @override
+  void performLayout() {
+    final child = this.child!;
+    child.layout(constraints, parentUsesSize: true);
+    final geometry = child.geometry!;
+    // Lay out the following slivers as if this one scrolled away, while it keeps painting its pinned part over them
+    final unpinnedExtent = calculatePaintOffset(constraints, from: 0, to: geometry.scrollExtent);
+    this.geometry = geometry.copyWith(layoutExtent: math.min(geometry.layoutExtent, unpinnedExtent));
   }
 }
 

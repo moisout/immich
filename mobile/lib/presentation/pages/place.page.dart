@@ -9,6 +9,7 @@ import 'package:immich_mobile/presentation/widgets/images/thumbnail.widget.dart'
 import 'package:immich_mobile/providers/infrastructure/asset.provider.dart';
 import 'package:immich_mobile/routing/router.dart';
 import 'package:immich_mobile/widgets/common/search_field.dart';
+import 'package:immich_mobile/widgets/common/tab_top_bar.dart';
 import 'package:immich_mobile/widgets/map/map_thumbnail.dart';
 import 'package:maplibre_gl/maplibre_gl.dart';
 
@@ -48,32 +49,36 @@ class _PlaceSliverAppBar extends HookWidget {
   Widget build(BuildContext context) {
     final searchFocusNode = useFocusNode();
 
-    return SliverAppBar(
-      floating: true,
-      pinned: true,
-      snap: false,
-      backgroundColor: context.colorScheme.surfaceContainer,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(5))),
-      automaticallyImplyLeading: search.value == null,
-      centerTitle: true,
-      title: search.value != null
-          ? SearchField(
-              focusNode: searchFocusNode,
-              onTapOutside: (_) => searchFocusNode.unfocus(),
-              onChanged: (value) => search.value = value,
-              filled: true,
-              hintText: context.t.filter_places,
-              autofocus: true,
-            )
-          : Text(context.t.places),
-      actions: [
-        IconButton(
-          icon: Icon(search.value != null ? Icons.close : Icons.search),
-          onPressed: () {
-            search.value = search.value == null ? '' : null;
-          },
-        ),
-      ],
+    return SliverScrollUnder(
+      sliver: SliverAppBar(
+        floating: true,
+        pinned: true,
+        forceMaterialTransparency: true,
+        flexibleSpace: const TabTopBarBackground(fillParent: true),
+        snap: false,
+        backgroundColor: context.colorScheme.surfaceContainer,
+        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(5))),
+        automaticallyImplyLeading: search.value == null,
+        centerTitle: true,
+        title: search.value != null
+            ? SearchField(
+                focusNode: searchFocusNode,
+                onTapOutside: (_) => searchFocusNode.unfocus(),
+                onChanged: (value) => search.value = value,
+                filled: true,
+                hintText: context.t.filter_places,
+                autofocus: true,
+              )
+            : Text(context.t.places),
+        actions: [
+          IconButton(
+            icon: Icon(search.value != null ? Icons.close : Icons.search),
+            onPressed: () {
+              search.value = search.value == null ? '' : null;
+            },
+          ),
+        ],
+      ),
     );
   }
 }

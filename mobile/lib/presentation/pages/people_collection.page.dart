@@ -13,6 +13,7 @@ import 'package:immich_mobile/routing/router.dart';
 import 'package:immich_mobile/utils/image_url_builder.dart';
 import 'package:immich_mobile/utils/people.utils.dart';
 import 'package:immich_mobile/widgets/common/search_field.dart';
+import 'package:immich_mobile/widgets/common/tab_top_bar.dart';
 
 @RoutePage()
 class PeopleCollectionPage extends ConsumerStatefulWidget {
@@ -42,7 +43,10 @@ class _PeopleCollectionPageState extends ConsumerState<PeopleCollectionPage> {
         final isPortrait = context.orientation == Orientation.portrait;
 
         return Scaffold(
+          extendBodyBehindAppBar: true,
           appBar: AppBar(
+            forceMaterialTransparency: true,
+            flexibleSpace: const TabTopBarBackground(fillParent: true),
             automaticallyImplyLeading: _search == null,
             title: _search != null
                 ? SearchField(
@@ -64,6 +68,8 @@ class _PeopleCollectionPageState extends ConsumerState<PeopleCollectionPage> {
             ],
           ),
           body: SafeArea(
+            // The grid scrolls underneath the app bar, it is padded instead
+            top: false,
             child: people.when(
               data: (people) {
                 final List<Person> filtered;
@@ -82,7 +88,7 @@ class _PeopleCollectionPageState extends ConsumerState<PeopleCollectionPage> {
                     childAspectRatio: 0.85,
                     mainAxisSpacing: isPortrait && isTablet ? 36 : 0,
                   ),
-                  padding: const EdgeInsets.symmetric(vertical: 32),
+                  padding: EdgeInsets.only(top: MediaQuery.paddingOf(context).top + 32, bottom: 32),
                   itemCount: filtered.length,
                   itemBuilder: (context, index) {
                     final person = filtered[index];

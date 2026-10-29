@@ -12,6 +12,7 @@ import 'package:immich_mobile/providers/server_info.provider.dart';
 import 'package:immich_mobile/providers/user.provider.dart';
 import 'package:immich_mobile/widgets/common/confirm_dialog.dart';
 import 'package:immich_mobile/widgets/common/immich_toast.dart';
+import 'package:immich_mobile/widgets/common/tab_top_bar.dart';
 
 @RoutePage()
 class TrashPage extends StatelessWidget {
@@ -33,14 +34,18 @@ class TrashPage extends StatelessWidget {
         }),
       ],
       child: Timeline(
-        appBar: SliverAppBar(
-          title: Text(context.t.trash),
-          floating: true,
-          snap: true,
-          pinned: true,
-          centerTitle: true,
-          elevation: 0,
-          actions: const [_TrashKebabMenu()],
+        appBar: SliverScrollUnder(
+          sliver: SliverAppBar(
+            title: Text(context.t.trash),
+            floating: true,
+            snap: true,
+            pinned: true,
+            forceMaterialTransparency: true,
+            flexibleSpace: const TabTopBarBackground(fillParent: true),
+            centerTitle: true,
+            elevation: 0,
+            actions: const [_TrashKebabMenu()],
+          ),
         ),
         topSliverWidgetHeight: 24,
         topSliverWidget: Consumer(

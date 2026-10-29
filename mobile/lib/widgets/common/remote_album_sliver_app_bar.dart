@@ -15,6 +15,7 @@ import 'package:immich_mobile/providers/infrastructure/timeline.provider.dart';
 import 'package:immich_mobile/providers/timeline/multiselect.provider.dart';
 import 'package:immich_mobile/routing/router.dart';
 import 'package:immich_mobile/widgets/album/remote_album_shared_user_icons.dart';
+import 'package:immich_mobile/widgets/common/tab_top_bar.dart';
 
 class RemoteAlbumSliverAppBar extends ConsumerStatefulWidget {
   const RemoteAlbumSliverAppBar({super.key, required this.kebabMenu, this.onEditTitle, this.onActivity});
@@ -61,68 +62,73 @@ class _MesmerizingSliverAppBarState extends ConsumerState<RemoteAlbumSliverAppBa
         const Shadow(offset: Offset(0, 2), blurRadius: 0, color: Colors.transparent),
     ];
 
-    return SliverAppBar(
-      expandedHeight: 400.0,
-      floating: false,
-      pinned: true,
-      snap: false,
-      elevation: 0,
-      leading: isMultiSelectEnabled
-          ? const SizedBox.shrink()
-          : IconButton(
-              icon: Icon(
-                Platform.isIOS ? Icons.arrow_back_ios_new_rounded : Icons.arrow_back,
-                color: actionIconColor,
-                shadows: actionIconShadows,
+    return SliverScrollUnder(
+      sliver: SliverAppBar(
+        expandedHeight: 400.0,
+        floating: false,
+        pinned: true,
+        forceMaterialTransparency: true,
+        snap: false,
+        elevation: 0,
+        leading: isMultiSelectEnabled
+            ? const SizedBox.shrink()
+            : IconButton(
+                icon: Icon(
+                  Platform.isIOS ? Icons.arrow_back_ios_new_rounded : Icons.arrow_back,
+                  color: actionIconColor,
+                  shadows: actionIconShadows,
+                ),
+                onPressed: () => context.maybePop(),
               ),
-              onPressed: () => context.maybePop(),
-            ),
-      actions: [
-        IconButton(
-          onPressed: () => context.pushRoute(SlideshowRoute(timeline: ref.read(timelineServiceProvider))),
-          icon: Icon(Icons.slideshow_outlined, color: actionIconColor, shadows: actionIconShadows),
-        ),
-        if (currentAlbum.isActivityEnabled && currentAlbum.isShared)
+        actions: [
           IconButton(
-            icon: Icon(Icons.chat_outlined, color: actionIconColor, shadows: actionIconShadows),
-            onPressed: widget.onActivity,
+            onPressed: () => context.pushRoute(SlideshowRoute(timeline: ref.read(timelineServiceProvider))),
+            icon: Icon(Icons.slideshow_outlined, color: actionIconColor, shadows: actionIconShadows),
           ),
-        widget.kebabMenu,
-      ],
-      title: Builder(
-        builder: (context) {
-          final settings = context.dependOnInheritedWidgetOfExactType<FlexibleSpaceBarSettings>();
-          final scrollProgress = _calculateScrollProgress(settings);
+          if (currentAlbum.isActivityEnabled && currentAlbum.isShared)
+            IconButton(
+              icon: Icon(Icons.chat_outlined, color: actionIconColor, shadows: actionIconShadows),
+              onPressed: widget.onActivity,
+            ),
+          widget.kebabMenu,
+        ],
+        title: Builder(
+          builder: (context) {
+            final settings = context.dependOnInheritedWidgetOfExactType<FlexibleSpaceBarSettings>();
+            final scrollProgress = _calculateScrollProgress(settings);
 
-          return AnimatedSwitcher(
-            duration: const Duration(milliseconds: 200),
-            child: scrollProgress > 0.95
-                ? Text(
-                    currentAlbum.name,
-                    style: TextStyle(color: context.primaryColor, fontWeight: FontWeight.w600, fontSize: 18),
-                  )
-                : null,
-          );
-        },
-      ),
-      flexibleSpace: Builder(
-        builder: (context) {
-          final settings = context.dependOnInheritedWidgetOfExactType<FlexibleSpaceBarSettings>();
-          final scrollProgress = _calculateScrollProgress(settings);
+            return AnimatedSwitcher(
+              duration: const Duration(milliseconds: 200),
+              child: scrollProgress > 0.95
+                  ? Text(
+                      currentAlbum.name,
+                      style: TextStyle(color: context.primaryColor, fontWeight: FontWeight.w600, fontSize: 18),
+                    )
+                  : null,
+            );
+          },
+        ),
+        flexibleSpace: Builder(
+          builder: (context) {
+            final settings = context.dependOnInheritedWidgetOfExactType<FlexibleSpaceBarSettings>();
+            final scrollProgress = _calculateScrollProgress(settings);
 
-          // Update scroll progress for the leading button
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted && _scrollProgress != scrollProgress) {
-              setState(() {
-                _scrollProgress = scrollProgress;
-              });
-            }
-          });
+            // Update scroll progress for the leading button
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted && _scrollProgress != scrollProgress) {
+                setState(() {
+                  _scrollProgress = scrollProgress;
+                });
+              }
+            });
 
-          return FlexibleSpaceBar(
-            background: _ExpandedBackground(scrollProgress: scrollProgress, onEditTitle: widget.onEditTitle),
-          );
-        },
+            return FlexibleSpaceTopBarBlur(
+              child: FlexibleSpaceBar(
+                background: _ExpandedBackground(scrollProgress: scrollProgress, onEditTitle: widget.onEditTitle),
+              ),
+            );
+          },
+        ),
       ),
     );
   }

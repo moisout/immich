@@ -16,6 +16,7 @@ import 'package:immich_mobile/providers/infrastructure/timeline.provider.dart';
 import 'package:immich_mobile/providers/timeline/multiselect.provider.dart';
 import 'package:immich_mobile/utils/image_url_builder.dart';
 import 'package:immich_mobile/utils/people.utils.dart';
+import 'package:immich_mobile/widgets/common/tab_top_bar.dart';
 
 class PersonSliverAppBar extends ConsumerStatefulWidget {
   const PersonSliverAppBar({
@@ -66,72 +67,77 @@ class _MesmerizingSliverAppBarState extends ConsumerState<PersonSliverAppBar> {
         const Shadow(offset: Offset(0, 2), blurRadius: 0, color: Colors.transparent),
     ];
 
-    return SliverAppBar(
-      expandedHeight: 300.0,
-      floating: false,
-      pinned: true,
-      snap: false,
-      elevation: 0,
-      leading: hideWhenSelecting(
-        IconButton(
-          icon: Icon(
-            Platform.isIOS ? Icons.arrow_back_ios_new_rounded : Icons.arrow_back,
-            color: Color.lerp(Colors.white, context.primaryColor, _scrollProgress),
-            shadows: [
-              _scrollProgress < 0.95
-                  ? Shadow(offset: const Offset(0, 2), blurRadius: 5, color: Colors.black.withValues(alpha: 0.5))
-                  : const Shadow(offset: Offset(0, 2), blurRadius: 0, color: Colors.transparent),
-            ],
+    return SliverScrollUnder(
+      sliver: SliverAppBar(
+        expandedHeight: 300.0,
+        floating: false,
+        pinned: true,
+        forceMaterialTransparency: true,
+        snap: false,
+        elevation: 0,
+        leading: hideWhenSelecting(
+          IconButton(
+            icon: Icon(
+              Platform.isIOS ? Icons.arrow_back_ios_new_rounded : Icons.arrow_back,
+              color: Color.lerp(Colors.white, context.primaryColor, _scrollProgress),
+              shadows: [
+                _scrollProgress < 0.95
+                    ? Shadow(offset: const Offset(0, 2), blurRadius: 5, color: Colors.black.withValues(alpha: 0.5))
+                    : const Shadow(offset: Offset(0, 2), blurRadius: 0, color: Colors.transparent),
+              ],
+            ),
+            onPressed: () {
+              context.pop();
+            },
           ),
-          onPressed: () {
-            context.pop();
+        ),
+        actions: [
+          hideWhenSelecting(
+            IconButton(
+              icon: Icon(Icons.more_vert, color: actionIconColor, shadows: actionIconShadows),
+              onPressed: widget.onShowOptions,
+            ),
+          ),
+        ],
+        flexibleSpace: Builder(
+          builder: (context) {
+            final settings = context.dependOnInheritedWidgetOfExactType<FlexibleSpaceBarSettings>();
+            final scrollProgress = _calculateScrollProgress(settings);
+
+            // Update scroll progress for the leading button
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted && _scrollProgress != scrollProgress) {
+                setState(() {
+                  _scrollProgress = scrollProgress;
+                });
+              }
+            });
+
+            return FlexibleSpaceTopBarBlur(
+              child: FlexibleSpaceBar(
+                centerTitle: true,
+                title: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 200),
+                  child: scrollProgress > 0.95
+                      ? Text(
+                          widget.person.name,
+                          style: TextStyle(color: context.primaryColor, fontWeight: FontWeight.w600, fontSize: 18),
+                        )
+                      : null,
+                ),
+                background: IgnorePointer(
+                  ignoring: isMultiSelectEnabled,
+                  child: _ExpandedBackground(
+                    scrollProgress: scrollProgress,
+                    person: widget.person,
+                    onNameTap: widget.onNameTap,
+                    onBirthdayTap: widget.onBirthdayTap,
+                  ),
+                ),
+              ),
+            );
           },
         ),
-      ),
-      actions: [
-        hideWhenSelecting(
-          IconButton(
-            icon: Icon(Icons.more_vert, color: actionIconColor, shadows: actionIconShadows),
-            onPressed: widget.onShowOptions,
-          ),
-        ),
-      ],
-      flexibleSpace: Builder(
-        builder: (context) {
-          final settings = context.dependOnInheritedWidgetOfExactType<FlexibleSpaceBarSettings>();
-          final scrollProgress = _calculateScrollProgress(settings);
-
-          // Update scroll progress for the leading button
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted && _scrollProgress != scrollProgress) {
-              setState(() {
-                _scrollProgress = scrollProgress;
-              });
-            }
-          });
-
-          return FlexibleSpaceBar(
-            centerTitle: true,
-            title: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 200),
-              child: scrollProgress > 0.95
-                  ? Text(
-                      widget.person.name,
-                      style: TextStyle(color: context.primaryColor, fontWeight: FontWeight.w600, fontSize: 18),
-                    )
-                  : null,
-            ),
-            background: IgnorePointer(
-              ignoring: isMultiSelectEnabled,
-              child: _ExpandedBackground(
-                scrollProgress: scrollProgress,
-                person: widget.person,
-                onNameTap: widget.onNameTap,
-                onBirthdayTap: widget.onBirthdayTap,
-              ),
-            ),
-          );
-        },
       ),
     );
   }
