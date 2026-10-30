@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
 import 'package:immich_mobile/domain/services/timeline.service.dart';
 import 'package:immich_mobile/presentation/widgets/images/image_provider.dart';
+import 'package:immich_mobile/widgets/common/hdr_image.dart';
 
 class AssetPreloader {
   static final _dummyListener = ImageStreamListener((image, _) => image.dispose());
@@ -36,6 +37,12 @@ class AssetPreloader {
       _nextStream?.removeListener(_dummyListener);
       _prevStream = prev != null ? _resolveImage(prev, size, thumbnailSize) : null;
       _nextStream = next != null ? _resolveImage(next, size, thumbnailSize) : null;
+      for (final asset in [prev, next]) {
+        final localId = asset?.localId;
+        if (asset != null && asset.isImage && localId != null) {
+          unawaited(HdrImages.prepare(localId));
+        }
+      }
     });
   }
 

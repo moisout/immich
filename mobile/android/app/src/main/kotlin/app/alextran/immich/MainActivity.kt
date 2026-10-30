@@ -13,6 +13,7 @@ import app.alextran.immich.connectivity.ConnectivityApiImpl
 import app.alextran.immich.core.HttpClientManager
 import app.alextran.immich.core.ImmichPlugin
 import app.alextran.immich.core.NetworkApiPlugin
+import app.alextran.immich.fork.HdrImagePlugin
 import app.alextran.immich.fork.ScrollLimitHapticsPlugin
 import me.albemala.native_video_player.NativeVideoPlayerPlugin
 import app.alextran.immich.images.LocalImageApi
@@ -25,10 +26,18 @@ import app.alextran.immich.sync.NativeSyncApi
 import app.alextran.immich.sync.NativeSyncApiImpl26
 import app.alextran.immich.sync.NativeSyncApiImpl30
 import app.alextran.immich.viewintent.ViewIntentPlugin
+import io.flutter.embedding.android.FlutterActivityLaunchConfigs.BackgroundMode
 import io.flutter.embedding.android.FlutterFragmentActivity
+import io.flutter.embedding.android.RenderMode
 import io.flutter.embedding.engine.FlutterEngine
 
 class MainActivity : FlutterFragmentActivity() {
+  // Lets the HDR image layer below the Flutter surface show through it (fork)
+  override fun getBackgroundMode() = BackgroundMode.transparent
+
+  // Transparent mode switches to a texture view by default, the HDR layer needs a surface view (fork)
+  override fun getRenderMode() = RenderMode.surface
+
   override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
     super.configureFlutterEngine(flutterEngine)
     registerPlugins(this, flutterEngine)
@@ -65,6 +74,7 @@ class MainActivity : FlutterFragmentActivity() {
 
       flutterEngine.plugins.add(ViewIntentPlugin())
       flutterEngine.plugins.add(ScrollLimitHapticsPlugin())
+      flutterEngine.plugins.add(HdrImagePlugin())
       flutterEngine.plugins.add(backgroundEngineLockImpl)
       flutterEngine.plugins.add(nativeSyncApiImpl)
       flutterEngine.plugins.add(permissionApiImpl)
