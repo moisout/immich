@@ -287,6 +287,10 @@ without leaving the page) needs a `PredictiveBackScope` to follow the finger; a 
 switches on release. If upstream enables auto_route's `enablePredictiveBackGesture`, turn it off again, auto_route
 would wrap pages in Flutter's predictive back transition and both would drive the route.
 
+## Parked investigations
+
+- HDR photos (Ultra HDR / ProXDR) in the viewer: [FORK-HDR.md](FORK-HDR.md), prototypes on the `hdr/*` branches.
+
 ## Conflict hotspots
 
 | File | Changes | Risk | Strategy |
