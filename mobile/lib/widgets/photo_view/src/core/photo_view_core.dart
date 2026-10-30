@@ -52,6 +52,7 @@ class PhotoViewCore extends StatefulWidget {
     required this.disableGestures,
     required this.disableScaleGestures,
     required this.enablePanAlways,
+    this.overlay,
   }) : customChild = null;
 
   const PhotoViewCore.customChild({
@@ -81,6 +82,7 @@ class PhotoViewCore extends StatefulWidget {
     required this.enablePanAlways,
   }) : semanticLabel = null,
        imageProvider = null,
+       overlay = null,
        gaplessPlayback = false;
 
   final Decoration? backgroundDecoration;
@@ -90,6 +92,9 @@ class PhotoViewCore extends StatefulWidget {
   final PhotoViewHeroAttributes? heroAttributes;
   final bool enableRotation;
   final Widget? customChild;
+
+  /// Shown over the image, transformed with it but not part of its hero
+  final Widget? overlay;
 
   final PhotoViewControllerBase controller;
   final PhotoViewScaleStateController scaleStateController;
@@ -376,7 +381,14 @@ class PhotoViewCoreState extends State<PhotoViewCore>
 
           final Widget customChildLayout = CustomSingleChildLayout(
             delegate: _CenterWithOriginalSizeDelegate(scaleBoundaries.childSize, basePosition, useImageScale),
-            child: _buildHero(_buildChild()),
+            child: widget.overlay == null
+                ? _buildHero(_buildChild())
+                : Stack(
+                    children: [
+                      _buildHero(_buildChild()),
+                      Positioned.fill(child: widget.overlay!),
+                    ],
+                  ),
           );
 
           final child = Container(

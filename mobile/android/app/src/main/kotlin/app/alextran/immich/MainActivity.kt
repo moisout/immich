@@ -2,7 +2,11 @@ package app.alextran.immich
 
 import android.content.Context
 import android.content.Intent
+import android.graphics.Color
+import android.graphics.PixelFormat
+import android.graphics.drawable.ColorDrawable
 import android.os.Build
+import android.os.Bundle
 import android.os.ext.SdkExtensions
 import app.alextran.immich.background.BackgroundEngineLock
 import app.alextran.immich.background.BackgroundWorkerApiImpl
@@ -13,6 +17,7 @@ import app.alextran.immich.connectivity.ConnectivityApiImpl
 import app.alextran.immich.core.HttpClientManager
 import app.alextran.immich.core.ImmichPlugin
 import app.alextran.immich.core.NetworkApiPlugin
+import app.alextran.immich.fork.HdrImagePlugin
 import app.alextran.immich.fork.ScrollLimitHapticsPlugin
 import me.albemala.native_video_player.NativeVideoPlayerPlugin
 import app.alextran.immich.images.LocalImageApi
@@ -25,10 +30,26 @@ import app.alextran.immich.sync.NativeSyncApi
 import app.alextran.immich.sync.NativeSyncApiImpl26
 import app.alextran.immich.sync.NativeSyncApiImpl30
 import app.alextran.immich.viewintent.ViewIntentPlugin
+import io.flutter.embedding.android.FlutterActivityLaunchConfigs.BackgroundMode
 import io.flutter.embedding.android.FlutterFragmentActivity
+import io.flutter.embedding.android.RenderMode
 import io.flutter.embedding.engine.FlutterEngine
 
 class MainActivity : FlutterFragmentActivity() {
+  // Lets the HDR image view below the Flutter surface show through it (fork)
+  override fun getBackgroundMode() = BackgroundMode.transparent
+
+  // Flutter renders into a texture view, drawn into the window like any other view, so the window stays opaque and
+  // ColorOS composes HDR in it correctly (fork)
+  override fun getRenderMode() = RenderMode.texture
+
+  // Transparent mode also gives the window a transparent background (fork)
+  override fun onCreate(savedInstanceState: Bundle?) {
+    super.onCreate(savedInstanceState)
+    window.setBackgroundDrawable(ColorDrawable(Color.BLACK))
+    window.setFormat(PixelFormat.OPAQUE)
+  }
+
   override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
     super.configureFlutterEngine(flutterEngine)
     registerPlugins(this, flutterEngine)
@@ -65,6 +86,7 @@ class MainActivity : FlutterFragmentActivity() {
 
       flutterEngine.plugins.add(ViewIntentPlugin())
       flutterEngine.plugins.add(ScrollLimitHapticsPlugin())
+      flutterEngine.plugins.add(HdrImagePlugin())
       flutterEngine.plugins.add(backgroundEngineLockImpl)
       flutterEngine.plugins.add(nativeSyncApiImpl)
       flutterEngine.plugins.add(permissionApiImpl)

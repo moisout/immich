@@ -268,6 +268,7 @@ class PhotoView extends StatefulWidget {
     this.disableScaleGestures,
     this.errorBuilder,
     this.enablePanAlways,
+    this.overlay,
   }) : child = null,
        childSize = null;
 
@@ -312,6 +313,7 @@ class PhotoView extends StatefulWidget {
     this.enablePanAlways,
   }) : semanticLabel = null,
        errorBuilder = null,
+       overlay = null,
        imageProvider = null,
        gaplessPlayback = false,
        loadingBuilder = null,
@@ -450,6 +452,9 @@ class PhotoView extends StatefulWidget {
   /// Enable pan the widget even if it's smaller than the hole parent widget.
   /// Useful when you want to drag a widget without restrictions.
   final bool? enablePanAlways;
+
+  /// Shown over the image, transformed with it but not part of its hero
+  final Widget? overlay;
 
   final int index;
 
@@ -614,6 +619,7 @@ class _PhotoViewState extends State<PhotoView> with AutomaticKeepAliveClientMixi
                 errorBuilder: widget.errorBuilder,
                 enablePanAlways: widget.enablePanAlways,
                 index: widget.index,
+                overlay: widget.overlay,
               );
       },
     );
