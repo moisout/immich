@@ -287,6 +287,16 @@ without leaving the page) needs a `PredictiveBackScope` to follow the finger; a 
 switches on release. If upstream enables auto_route's `enablePredictiveBackGesture`, turn it off again, auto_route
 would wrap pages in Flutter's predictive back transition and both would drive the route.
 
+### 9. Agent instructions
+
+Upstream's `AGENTS.md` files are trimmed to what applies to the fork: the root one keeps the repo overview (mobile and
+native only), mise tasks, generated files and translations, and drops upstream's contribution rules (PRs, issues, "no
+code comments", feature freezes) and server-side skills. `mobile/AGENTS.md` and `native/AGENTS.md` are kept as they
+are; the ones for `server/`, `web/`, `e2e/` and `machine-learning/` are deleted.
+
+Re-applying: an upstream change to a deleted file shows as a modify/delete conflict, keep it deleted (`git rm`). For the
+root `AGENTS.md`, take theirs and trim it again.
+
 ## Parked investigations
 
 - HDR photos (Ultra HDR / ProXDR) in the viewer: [FORK-HDR.md](FORK-HDR.md), prototypes on the `hdr/*` branches.
@@ -306,6 +316,7 @@ would wrap pages in Flutter's predictive back transition and both would drive th
 | `.../widgets/asset_viewer/asset_page.widget.dart` | 7, 8 | High | Take theirs, re-apply change 8's viewer edits: the scope and `_onBack*` methods, `_updateDismiss` / `_cancelDismiss`, details shift and keep, hero flag. Keep upstream's drag handling and port it into the extracted methods |
 | `main.dart`, `MainActivity.kt`, `scrubber.widget.dart` | 7, 8 | Low | One or two lines each, re-add |
 | `theme_data.dart`, `router.dart`, `thumbnail_tile.widget.dart`, `AndroidManifest.xml` | 8 | Low | One small edit each, re-add |
+| `AGENTS.md` files | 9 | Low | Keep the deleted ones deleted, trim the root one again |
 
 ## Test checklist
 
