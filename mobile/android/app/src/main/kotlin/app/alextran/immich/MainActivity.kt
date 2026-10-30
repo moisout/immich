@@ -13,6 +13,7 @@ import app.alextran.immich.connectivity.ConnectivityApiImpl
 import app.alextran.immich.core.HttpClientManager
 import app.alextran.immich.core.ImmichPlugin
 import app.alextran.immich.core.NetworkApiPlugin
+import app.alextran.immich.fork.HdrImagePlugin
 import app.alextran.immich.fork.ScrollLimitHapticsPlugin
 import me.albemala.native_video_player.NativeVideoPlayerPlugin
 import app.alextran.immich.images.LocalImageApi
@@ -65,6 +66,7 @@ class MainActivity : FlutterFragmentActivity() {
 
       flutterEngine.plugins.add(ViewIntentPlugin())
       flutterEngine.plugins.add(ScrollLimitHapticsPlugin())
+      flutterEngine.plugins.add(HdrImagePlugin())
       flutterEngine.plugins.add(backgroundEngineLockImpl)
       flutterEngine.plugins.add(nativeSyncApiImpl)
       flutterEngine.plugins.add(permissionApiImpl)

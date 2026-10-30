@@ -152,6 +152,8 @@
              This is used by the Flutter tool to
     generate GeneratedPluginRegistrant.java -->
     <meta-data android:name="flutterEmbedding" android:value="2" />
+    <!-- Hybrid Composition++, needed to show HDR images in a native view -->
+    <meta-data android:name="io.flutter.embedding.android.EnableHcpp" android:value="true" />
 
     <!-- Widgets -->
     <receiver
